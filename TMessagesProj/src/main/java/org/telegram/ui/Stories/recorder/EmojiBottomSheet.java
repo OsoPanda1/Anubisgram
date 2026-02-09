@@ -5,6 +5,7 @@ import static org.telegram.messenger.AndroidUtilities.dpf2;
 import static org.telegram.messenger.AndroidUtilities.lerp;
 import static org.telegram.messenger.AndroidUtilities.translitSafe;
 
+import android.Manifest;
 import android.app.Activity;
 import android.app.Dialog;
 import android.content.Context;
@@ -18,6 +19,7 @@ import android.graphics.Outline;
 import android.graphics.Paint;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffColorFilter;
+import android.graphics.PorterDuffXfermode;
 import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.Shader;
@@ -25,11 +27,12 @@ import android.graphics.drawable.Drawable;
 import android.os.Build;
 import android.text.Editable;
 import android.text.Layout;
+import android.text.SpannableStringBuilder;
+import android.text.Spanned;
 import android.text.StaticLayout;
 import android.text.TextPaint;
 import android.text.TextUtils;
 import android.text.TextWatcher;
-import android.util.Log;
 import android.util.SparseArray;
 import android.util.SparseIntArray;
 import android.util.TypedValue;
@@ -46,7 +49,6 @@ import android.widget.TextView;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
-import androidx.core.content.ContextCompat;
 import androidx.core.graphics.ColorUtils;
 import androidx.recyclerview.widget.DefaultItemAnimator;
 import androidx.recyclerview.widget.GridLayoutManager;
@@ -55,7 +57,6 @@ import androidx.recyclerview.widget.LinearSmoothScrollerCustom;
 import androidx.recyclerview.widget.RecyclerView;
 
 import org.telegram.messenger.AndroidUtilities;
-import org.telegram.messenger.DocumentObject;
 import org.telegram.messenger.Emoji;
 import org.telegram.messenger.FileLoader;
 import org.telegram.messenger.FileLog;
@@ -84,7 +85,6 @@ import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Cells.ContextLinkCell;
 import org.telegram.ui.Cells.StickerSetNameCell;
 import org.telegram.ui.Components.AnimatedEmojiDrawable;
-import org.telegram.ui.Components.AnimatedEmojiSpan;
 import org.telegram.ui.Components.AnimatedFileDrawable;
 import org.telegram.ui.Components.AnimatedFloat;
 import org.telegram.ui.Components.BackupImageView;
@@ -92,6 +92,7 @@ import org.telegram.ui.Components.Bulletin;
 import org.telegram.ui.Components.BulletinFactory;
 import org.telegram.ui.Components.ButtonBounce;
 import org.telegram.ui.Components.CloseProgressDrawable2;
+import org.telegram.ui.Components.CombinedDrawable;
 import org.telegram.ui.Components.CubicBezierInterpolator;
 import org.telegram.ui.Components.DrawingInBackgroundThreadDrawable;
 import org.telegram.ui.Components.EditTextBoldCursor;
@@ -99,6 +100,8 @@ import org.telegram.ui.Components.EmojiTabsStrip;
 import org.telegram.ui.Components.EmojiView;
 import org.telegram.ui.Components.ExtendedGridLayoutManager;
 import org.telegram.ui.Components.LayoutHelper;
+import org.telegram.ui.Components.LoadingSpan;
+import org.telegram.ui.Components.PermissionRequest;
 import org.telegram.ui.Components.Premium.PremiumFeatureBottomSheet;
 import org.telegram.ui.Components.RLottieDrawable;
 import org.telegram.ui.Components.Reactions.ReactionImageHolder;
@@ -136,6 +139,7 @@ public class EmojiBottomSheet extends BottomSheet implements NotificationCenter.
     private int categoryIndex = -1;
 
     public final TLRPC.Document widgets = new TLRPC.Document() {};
+    public final TLRPC.Document plus = new TLRPC.Document() {};
 
     abstract class IPage extends FrameLayout {
         public int currentType;
@@ -157,7 +161,7 @@ public class EmojiBottomSheet extends BottomSheet implements NotificationCenter.
         }
     }
 
-    private class GifPage extends IPage {
+    private class GifPage extends IPage implements NotificationCenter.NotificationCenterDelegate {
 
         public RecyclerListView listView;
         public GifAdapter adapter;
@@ -179,23 +183,22 @@ public class EmojiBottomSheet extends BottomSheet implements NotificationCenter.
             listView.addItemDecoration(new RecyclerView.ItemDecoration() {
                 @Override
                 public void getItemOffsets(@NonNull Rect outRect, @NonNull View view, @NonNull RecyclerView parent, @NonNull RecyclerView.State state) {
-                    outRect.right = layoutManager.isLastInRow(parent.getChildAdapterPosition(view) - 1) ? 0 : dp(4);
+                    outRect.right = layoutManager.isLastInRow(parent.getChildAdapterPosition(view)) ? 0 : dp(4);
                     outRect.bottom = dp(4);
                 }
             });
             listView.setClipToPadding(true);
             listView.setVerticalScrollBarEnabled(false);
             final RecyclerListView.OnItemClickListener onItemClickListener = (view, position) -> {
-                position--;
-                if (position < 0 || position >= gifs.size()) {
-                    return;
-                }
-                TLRPC.BotInlineResult res = gifs.get(position);
-                if (res == null) {
-                    return;
-                }
-                TLRPC.Document document = res.document;
-                if (document == null) {
+                Object obj = adapter.getItem(position);
+                TLObject res = null;
+                TLRPC.Document document = null;
+                if (obj instanceof TLRPC.BotInlineResult) {
+                    res = (TLRPC.BotInlineResult) obj;
+                    document = ((TLRPC.BotInlineResult) obj).document;
+                } else if (obj instanceof TLRPC.Document) {
+                    document = (TLRPC.Document) obj;
+                } else {
                     return;
                 }
                 if (onDocumentSelected != null) {
@@ -214,7 +217,7 @@ public class EmojiBottomSheet extends BottomSheet implements NotificationCenter.
                     }
 
                     int position = layoutManager.findLastCompletelyVisibleItemPosition();
-                    if (position + 3 >= adapter.getItemCount() - 1) {
+                    if (position + 7 >= adapter.getItemCount() - 1) {
                         adapter.request();
                     }
                 }
@@ -227,6 +230,7 @@ public class EmojiBottomSheet extends BottomSheet implements NotificationCenter.
                 EmojiBottomSheet.this.categoryIndex = category;
                 adapter.updateItems(query);
             });
+            searchField.checkCategoriesView(PAGE_TYPE_GIFS, false);
             addView(searchField, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP));
         }
 
@@ -290,14 +294,38 @@ public class EmojiBottomSheet extends BottomSheet implements NotificationCenter.
 
         @Override
         public void bind(int type) {
+            adapter.updateRecent(false);
+            if (gifs.isEmpty() && TextUtils.isEmpty(query)) {
+                adapter.request();
+            }
             adapter.updateItems(null);
         }
 
-        private static final int VIEW_TYPE_PAD = 0;
-        private static final int VIEW_TYPE_GIF = 1;
+        @Override
+        protected void onAttachedToWindow() {
+            super.onAttachedToWindow();
+            NotificationCenter.getInstance(currentAccount).addObserver(this, NotificationCenter.recentDocumentsDidLoad);
+        }
 
-        private ArrayList<TLRPC.BotInlineResult> gifs = new ArrayList<>();
-        private HashMap<String, ArrayList<TLRPC.BotInlineResult>> cache = new HashMap<>();
+        @Override
+        protected void onDetachedFromWindow() {
+            super.onDetachedFromWindow();
+            NotificationCenter.getInstance(currentAccount).removeObserver(this, NotificationCenter.recentDocumentsDidLoad);
+        }
+
+        @Override
+        public void didReceivedNotification(int id, int account, Object... args) {
+            if (id == NotificationCenter.recentDocumentsDidLoad) {
+                adapter.updateRecent(true);
+            }
+        }
+
+        private static final int VIEW_TYPE_PAD = 0;
+        private static final int VIEW_TYPE_HEADER = 1;
+        private static final int VIEW_TYPE_GIF = 2;
+
+        private final ArrayList<TLRPC.Document> mygifs = new ArrayList<>();
+        private final ArrayList<TLRPC.BotInlineResult> gifs = new ArrayList<>();
 
         private class GifAdapter extends RecyclerListView.SelectionAdapter {
 
@@ -307,6 +335,14 @@ public class EmojiBottomSheet extends BottomSheet implements NotificationCenter.
                 View view;
                 if (viewType == VIEW_TYPE_PAD) {
                     view = new View(getContext());
+                } else if (viewType == VIEW_TYPE_HEADER) {
+                    final StickerSetNameCell cell1 = new StickerSetNameCell(getContext(), false, resourcesProvider, false);
+                    cell1.setText(LocaleController.getString(R.string.FeaturedGifs), 0);
+                    view = cell1;
+                    final RecyclerView.LayoutParams lp = new RecyclerView.LayoutParams(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT);
+                    lp.topMargin = AndroidUtilities.dp(2.5f);
+                    lp.bottomMargin = AndroidUtilities.dp(5.5f);
+                    view.setLayoutParams(lp);
                 } else {
                     ContextLinkCell cell = new ContextLinkCell(getContext());
                     cell.getPhotoImage().setLayerNum(7);
@@ -325,19 +361,53 @@ public class EmojiBottomSheet extends BottomSheet implements NotificationCenter.
                     holder.itemView.setTag(34);
                     holder.itemView.setLayoutParams(new RecyclerView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) maxPadding));
                 } else if (viewType == VIEW_TYPE_GIF) {
-                    ((ContextLinkCell) holder.itemView).setLink(gifs.get(position - 1), bot, true, false, false, true);
+                    final ContextLinkCell cell = (ContextLinkCell) holder.itemView;
+                    final Object obj = getItem(position);
+                    if (obj instanceof TLRPC.Document) {
+                        cell.setGif((TLRPC.Document) obj, false);
+                    } else if (obj instanceof TLRPC.BotInlineResult) {
+                        cell.setLink((TLRPC.BotInlineResult) obj, bot, true, false, false, true);
+                    }
                 }
             }
 
             @Override
             public int getItemCount() {
-                return 1 + gifs.size();
+                return 1 + (!mygifs.isEmpty() && TextUtils.isEmpty(query) ? mygifs.size() : 0) + (gifs.isEmpty() ? 0 : (!mygifs.isEmpty() && TextUtils.isEmpty(query) ? 1 : 0) + gifs.size());
+            }
+
+            public Object getItem(int position) {
+                position--;
+                if (!mygifs.isEmpty() && TextUtils.isEmpty(query)) {
+                    if (position >= 0 && position < mygifs.size()) {
+                        return mygifs.get(position);
+                    }
+                    position -= mygifs.size();
+                }
+                if (!gifs.isEmpty()) {
+                    if (!mygifs.isEmpty() && TextUtils.isEmpty(query)) {
+                        position--;
+                    }
+                    if (position >= 0 && position < gifs.size()) {
+                        return gifs.get(position);
+                    }
+                }
+                return null;
             }
 
             @Override
             public int getItemViewType(int position) {
                 if (position == 0) {
                     return VIEW_TYPE_PAD;
+                }
+                position--;
+                if (!mygifs.isEmpty() && TextUtils.isEmpty(query)) {
+                    position -= mygifs.size();
+                }
+                if (!gifs.isEmpty()) {
+                    if (!mygifs.isEmpty() && TextUtils.isEmpty(query) && position == 0)
+                        return VIEW_TYPE_HEADER;
+                    position--;
                 }
                 return VIEW_TYPE_GIF;
             }
@@ -356,6 +426,7 @@ public class EmojiBottomSheet extends BottomSheet implements NotificationCenter.
                     requesting = false;
                     offset = "";
                 }
+                final boolean wasQueryEmpty = TextUtils.isEmpty(this.query);
                 this.query = query;
                 AndroidUtilities.cancelRunOnUIThread(searchRunnable);
                 if (TextUtils.isEmpty(query)) {
@@ -363,6 +434,9 @@ public class EmojiBottomSheet extends BottomSheet implements NotificationCenter.
                     searchField.showProgress(false);
                     notifyDataSetChanged();
                 } else {
+                    if (wasQueryEmpty) {
+                        notifyDataSetChanged();
+                    }
                     searchField.showProgress(true);
                     AndroidUtilities.runOnUIThread(searchRunnable, 1500);
                 }
@@ -376,6 +450,12 @@ public class EmojiBottomSheet extends BottomSheet implements NotificationCenter.
             private String offset;
             private boolean requestedBot;
             private boolean requesting = false;
+
+            private void updateRecent(boolean notify) {
+                mygifs.clear();
+                mygifs.addAll(MediaDataController.getInstance(currentAccount).getRecentGifs());
+                if (notify) notifyDataSetChanged();
+            }
 
             private void request() {
                 if (requesting) {
@@ -437,11 +517,7 @@ public class EmojiBottomSheet extends BottomSheet implements NotificationCenter.
                         }
                         int position = gifs.size();
                         gifs.addAll(response.results);
-                        if (emptyOffset) {
-                            notifyDataSetChanged();
-                        } else {
-                            notifyItemRangeInserted(position, gifs.size() - position);
-                        }
+                        notifyDataSetChanged();
 
                         searchField.showProgress(false);
                         requesting = false;
@@ -460,11 +536,7 @@ public class EmojiBottomSheet extends BottomSheet implements NotificationCenter.
                                 }
                                 int position = gifs.size();
                                 gifs.addAll(response.results);
-                                if (emptyOffset) {
-                                    notifyDataSetChanged();
-                                } else {
-                                    notifyItemRangeInserted(position, gifs.size() - position);
-                                }
+                                notifyDataSetChanged();
                             }
 
                             searchField.showProgress(false);
@@ -484,26 +556,27 @@ public class EmojiBottomSheet extends BottomSheet implements NotificationCenter.
                 setSpanSizeLookup(new GridLayoutManager.SpanSizeLookup() {
                     @Override
                     public int getSpanSize(int position) {
-                        if (position == 0) {
-                            return getSpanCount();
-                        }
-                        return getSpanSizeForItem(position - 1);
+                        Object obj = adapter.getItem(position);
+                        if (obj == null) return getSpanCount();
+                        return getSpanSizeForItem(position);
                     }
                 });
             }
 
             @Override
             protected int getFlowItemCount() {
-                return getItemCount() - 1;
+                return getItemCount();
             }
 
 
             @Override
             protected Size getSizeForItem(int i) {
+                size.full = false;
                 TLRPC.Document document = null;
                 ArrayList<TLRPC.DocumentAttribute> attributes = null;
-                if (i >= 0 && i < gifs.size()) {
-                    TLRPC.BotInlineResult result = gifs.get(i);
+                Object obj = adapter.getItem(i);
+                if (obj instanceof TLRPC.BotInlineResult) {
+                    TLRPC.BotInlineResult result = (TLRPC.BotInlineResult) obj;
                     document = result.document;
                     if (document != null) {
                         attributes = document.attributes;
@@ -514,12 +587,19 @@ public class EmojiBottomSheet extends BottomSheet implements NotificationCenter.
                     } else {
                         attributes = null;
                     }
+                } else if (obj instanceof TLRPC.Document) {
+                    document = (TLRPC.Document) obj;
+                    attributes = document.attributes;
+                } else {
+                    size.full = true;
+                    return size;
                 }
                 return getSizeForItem(document, attributes);
             }
 
             public Size getSizeForItem(TLRPC.Document document, List<TLRPC.DocumentAttribute> attributes) {
                 size.width = size.height = 100;
+                size.full = false;
                 if (document != null) {
                     TLRPC.PhotoSize thumb = FileLoader.getClosestPhotoSizeWithSize(document.thumbs, 90);
                     if (thumb != null && thumb.w != 0 && thumb.h != 0) {
@@ -576,6 +656,13 @@ public class EmojiBottomSheet extends BottomSheet implements NotificationCenter.
                     return;
                 }
                 TLRPC.Document document = position >= adapter.documents.size() ? null : adapter.documents.get(position);
+                if (document == plus) {
+                    if (onPlusSelected != null) {
+                        onPlusSelected.run();
+                    }
+                    dismiss();
+                    return;
+                }
                 long documentId = position >= adapter.documentIds.size() ? 0L : adapter.documentIds.get(position);
                 if (document == null && view instanceof EmojiListView.EmojiImageView && ((EmojiListView.EmojiImageView) view).drawable != null) {
                     document = ((EmojiListView.EmojiImageView) view).drawable.getDocument();
@@ -587,7 +674,7 @@ public class EmojiBottomSheet extends BottomSheet implements NotificationCenter.
                     return;
                 }
                 if (onDocumentSelected != null) {
-                    onDocumentSelected.run(null, document, false);
+                    onDocumentSelected.run(document != null ? adapter.setByDocumentId.get(document.id) : null, document, false);
                 }
                 dismiss();
             });
@@ -652,7 +739,7 @@ public class EmojiBottomSheet extends BottomSheet implements NotificationCenter.
             });
             addView(searchField, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP));
 
-            tabsStrip = new EmojiTabsStrip(context, resourcesProvider, false, false, true, 0, null) {
+            tabsStrip = new EmojiTabsStrip(context, resourcesProvider, false, false, false, true, 0, null) {
                 @Override
                 protected boolean onTabClick(int index) {
                     if (scrollingAnimation) {
@@ -743,23 +830,28 @@ public class EmojiBottomSheet extends BottomSheet implements NotificationCenter.
                 searchField.ignoreTextChange = true;
                 searchField.editText.setText("");
                 searchField.ignoreTextChange = false;
-                searchField.categoriesListView.selectCategory(categoryIndex);
-                searchField.categoriesListView.scrollToSelected();
-                StickerCategoriesListView.EmojiCategory category = searchField.categoriesListView.getSelectedCategory();
-                if (category != null) {
-                    adapter.query = searchField.categoriesListView.getSelectedCategory().emojis;
-                    AndroidUtilities.cancelRunOnUIThread(adapter.searchRunnable);
-                    AndroidUtilities.runOnUIThread(adapter.searchRunnable);
+                if (searchField.categoriesListView != null) {
+                    searchField.categoriesListView.selectCategory(categoryIndex);
+                    searchField.categoriesListView.scrollToSelected();
+                    StickerCategoriesListView.EmojiCategory category = searchField.categoriesListView.getSelectedCategory();
+                    if (category != null) {
+                        adapter.query = searchField.categoriesListView.getSelectedCategory().emojis;
+                        AndroidUtilities.cancelRunOnUIThread(adapter.searchRunnable);
+                        AndroidUtilities.runOnUIThread(adapter.searchRunnable);
+                    }
                 }
             } else if (!TextUtils.isEmpty(query)) {
                 searchField.editText.setText(query);
-                searchField.categoriesListView.selectCategory(null);
-                searchField.categoriesListView.scrollToStart();
+                if (searchField.categoriesListView != null) {
+                    searchField.categoriesListView.selectCategory(null);
+                    searchField.categoriesListView.scrollToStart();
+                }
                 AndroidUtilities.cancelRunOnUIThread(adapter.searchRunnable);
                 AndroidUtilities.runOnUIThread(adapter.searchRunnable);
             } else {
                 searchField.clear();
             }
+            searchField.checkCategoriesView(type, greeting);
 
             MediaDataController.getInstance(currentAccount).checkStickers(type == PAGE_TYPE_EMOJI ? MediaDataController.TYPE_EMOJIPACKS : MediaDataController.TYPE_IMAGE);
         }
@@ -779,6 +871,7 @@ public class EmojiBottomSheet extends BottomSheet implements NotificationCenter.
             private int lastAllSetsCount;
             private final HashMap<String, ArrayList<Long>> allEmojis = new HashMap<>();
             private final HashMap<Long, ArrayList<TLRPC.TL_stickerPack>> packsBySet = new HashMap<>();
+            private final HashMap<Long, Object> setByDocumentId = new HashMap<>();
 
             private final ArrayList<TLRPC.TL_messages_stickerSet> allStickerSets = new ArrayList<>();
             private final ArrayList<TLRPC.TL_messages_stickerSet> stickerSets = new ArrayList<>();
@@ -826,6 +919,7 @@ public class EmojiBottomSheet extends BottomSheet implements NotificationCenter.
                 positionToSection.clear();
                 stickerSets.clear();
                 allStickerSets.clear();
+                setByDocumentId.clear();
                 itemsCount++; // pan
                 documents.add(null);
                 packs.clear();
@@ -843,7 +937,7 @@ public class EmojiBottomSheet extends BottomSheet implements NotificationCenter.
                         }
                         faveSet.documents = favorites;
                         faveSet.set = new TLRPC.TL_stickerSet();
-                        faveSet.set.title = LocaleController.getString("FavoriteStickers", R.string.FavoriteStickers);
+                        faveSet.set.title = LocaleController.getString(R.string.FavoriteStickers);
                         stickerSets.add(faveSet);
                     }
 
@@ -853,8 +947,11 @@ public class EmojiBottomSheet extends BottomSheet implements NotificationCenter.
                             recentSet = new TLRPC.TL_messages_stickerSet();
                         }
                         recentSet.documents = recent;
+                        if (onPlusSelected != null) {
+                            recentSet.documents.add(0, plus);
+                        }
                         recentSet.set = new TLRPC.TL_stickerSet();
-                        recentSet.set.title = LocaleController.getString("RecentStickers", R.string.RecentStickers);
+                        recentSet.set.title = LocaleController.getString(R.string.RecentStickers);
                         stickerSets.add(recentSet);
                     }
                 }
@@ -874,6 +971,12 @@ public class EmojiBottomSheet extends BottomSheet implements NotificationCenter.
                     // emoji/stickers
                     documents.addAll(set.documents);
                     itemsCount += set.documents.size();
+                    Object parentObject = set;
+                    if (set == recentSet) parentObject = "recent";
+                    else if (set == faveSet) parentObject = "fav";
+                    for (int j = 0; j < set.documents.size(); ++j) {
+                        setByDocumentId.put(set.documents.get(j).id, parentObject);
+                    }
 
                     EmojiView.EmojiPack pack = new EmojiView.EmojiPack();
                     pack.documents = set.documents;
@@ -967,6 +1070,9 @@ public class EmojiBottomSheet extends BottomSheet implements NotificationCenter.
                             // emoji/stickers
                             documents.addAll(set.documents);
                             itemsCount += set.documents.size();
+                            for (int k = 0; k < set.documents.size(); ++k) {
+                                setByDocumentId.put(set.documents.get(k).id, set);
+                            }
 
                             EmojiView.EmojiPack pack = new EmojiView.EmojiPack();
                             pack.documents = set.documents;
@@ -1029,8 +1135,58 @@ public class EmojiBottomSheet extends BottomSheet implements NotificationCenter.
             private HashSet<Long> searchDocumentIds = new HashSet<>();
 
             private final Runnable searchRunnable = () -> {
-                final String thisQuery = query;
                 final MediaDataController mediaDataController = MediaDataController.getInstance(currentAccount);
+                final String thisQuery = query;
+                if ("premium".equalsIgnoreCase(thisQuery)) {
+                    ArrayList<TLRPC.Document> premiumStickers = mediaDataController.getRecentStickers(MediaDataController.TYPE_PREMIUM_STICKERS);
+                    itemsCount = 0;
+                    documents.clear();
+                    documentIds.clear();
+                    positionToSection.clear();
+                    stickerSets.clear();
+                    itemsCount++; // pan
+                    documents.add(null);
+                    documentIds.add(0L);
+                    documents.addAll(premiumStickers);
+                    itemsCount += premiumStickers.size();
+                    activeQuery = query;
+                    notifyDataSetChanged();
+
+                    listView.scrollToPosition(0, 0);
+                    searchField.showProgress(false);
+                    tabsStrip.showSelected(false);
+                    return;
+                }
+                if (currentType == PAGE_TYPE_STICKERS && Emoji.fullyConsistsOfEmojis(query)) {
+                    final TLRPC.TL_messages_getStickers req = new TLRPC.TL_messages_getStickers();
+                    req.emoticon = query;
+                    req.hash = 0;
+                    int reqId = ConnectionsManager.getInstance(currentAccount).sendRequest(req, (response, error) -> AndroidUtilities.runOnUIThread(() -> {
+                        if (!TextUtils.equals(thisQuery, query)) {
+                            return;
+                        }
+                        itemsCount = 0;
+                        documents.clear();
+                        documentIds.clear();
+                        positionToSection.clear();
+                        stickerSets.clear();
+                        itemsCount++; // pan
+                        documents.add(null);
+                        documentIds.add(0L);
+                        if (response instanceof TLRPC.TL_messages_stickers) {
+                            TLRPC.TL_messages_stickers res = (TLRPC.TL_messages_stickers) response;
+                            documents.addAll(res.stickers);
+                            itemsCount += res.stickers.size();
+                        }
+                        activeQuery = query;
+                        notifyDataSetChanged();
+
+                        listView.scrollToPosition(0, 0);
+                        searchField.showProgress(false);
+                        tabsStrip.showSelected(false);
+                    }));
+                    return;
+                }
                 String[] lang = AndroidUtilities.getCurrentKeyboardLanguage();
                 if (lastLang == null || !Arrays.equals(lang, lastLang)) {
                     MediaDataController.getInstance(currentAccount).fetchNewEmojiKeywords(lang);
@@ -1077,6 +1233,9 @@ public class EmojiBottomSheet extends BottomSheet implements NotificationCenter.
                         final HashMap<String, ArrayList<TLRPC.Document>> allStickers = mediaDataController.getAllStickers();
                         for (int i = 0; i < result.size(); ++i) {
                             MediaDataController.KeywordResult r = result.get(i);
+                            if (r.emoji == null || r.emoji.startsWith("animated_")) {
+                                continue;
+                            }
                             ArrayList<TLRPC.Document> stickers = allStickers.get(r.emoji);
                             if (stickers == null || stickers.isEmpty()) {
                                 continue;
@@ -1086,6 +1245,34 @@ public class EmojiBottomSheet extends BottomSheet implements NotificationCenter.
                                 if (d != null && !documents.contains(d)) {
                                     documents.add(d);
                                     itemsCount++;
+                                }
+                            }
+                        }
+                        final ArrayList<TLRPC.StickerSetCovered> featuredStickers = mediaDataController.getFeaturedStickerSets();
+                        for (int i = 0; i < result.size(); ++i) {
+                            MediaDataController.KeywordResult r = result.get(i);
+                            if (r.emoji == null || r.emoji.startsWith("animated_")) {
+                                continue;
+                            }
+                            for (int j = 0; j < featuredStickers.size(); ++j) {
+                                TLRPC.StickerSetCovered set = featuredStickers.get(j);
+                                ArrayList<TLRPC.Document> documents = null;
+                                if (set instanceof TLRPC.TL_stickerSetFullCovered) {
+                                    documents = ((TLRPC.TL_stickerSetFullCovered) set).documents;
+                                } else if (!set.covers.isEmpty()) {
+                                    documents = set.covers;
+                                } else if (set.cover != null) {
+                                    documents = new ArrayList<>();
+                                    documents.add(set.cover);
+                                } else {
+                                    continue;
+                                }
+                                for (int d = 0; d < documents.size(); ++d) {
+                                    String emoji = MessageObject.findAnimatedEmojiEmoticon(documents.get(d), null);
+                                    if (emoji != null && emoji.contains(r.emoji)) {
+                                        this.documents.add(documents.get(d));
+                                        itemsCount++;
+                                    }
                                 }
                             }
                         }
@@ -1134,7 +1321,7 @@ public class EmojiBottomSheet extends BottomSheet implements NotificationCenter.
                 if (viewType == VIEW_TYPE_PAD) {
                     view = new View(getContext());
                 } else if (viewType == VIEW_TYPE_HEADER) {
-                    view = new StickerSetNameCell(getContext(), true, resourcesProvider);
+                    view = new StickerSetNameCell(getContext(), true, resourcesProvider, false);
                 } else if (viewType == VIEW_TYPE_NOT_FOUND) {
                     view = new NoEmojiView(getContext(), currentType == PAGE_TYPE_EMOJI);
                 } else if (viewType == VIEW_TYPE_WIDGETS) {
@@ -1173,21 +1360,33 @@ public class EmojiBottomSheet extends BottomSheet implements NotificationCenter.
                     }
                 } else if (viewType == VIEW_TYPE_EMOJI) {
                     final TLRPC.Document document = position >= documents.size() ? null : documents.get(position);
+                    EmojiListView.EmojiImageView imageView = (EmojiListView.EmojiImageView) holder.itemView;
+                    if (document == plus) {
+                        imageView.setSticker(null);
+                        Drawable circle = Theme.createRoundRectDrawable(dp(28), Theme.multAlpha(getThemedColor(Theme.key_chat_emojiPanelIcon), .12f));
+                        Drawable drawable = getResources().getDrawable(R.drawable.filled_add_sticker).mutate();
+                        drawable.setColorFilter(new PorterDuffColorFilter(getThemedColor(Theme.key_chat_emojiPanelIcon), PorterDuff.Mode.MULTIPLY));
+                        CombinedDrawable combinedDrawable = new CombinedDrawable(circle, drawable);
+                        combinedDrawable.setCustomSize(dp(56), dp(56));
+                        combinedDrawable.setIconSize(dp(24), dp(24));
+                        combinedDrawable.setCenter(true);
+                        imageView.setDrawable(combinedDrawable);
+                        return;
+                    }
                     final long documentId = position >= documentIds.size() ? 0L : documentIds.get(position);
                     if (document == null && documentId == 0) {
                         return;
                     }
-                    EmojiListView.EmojiImageView imageView = (EmojiListView.EmojiImageView) holder.itemView;
                     if (currentType == PAGE_TYPE_EMOJI) {
                         if (document != null) {
                             imageView.setSticker(null);
-                            imageView.setEmoji(document);
+                            imageView.setEmoji(document, currentType == PAGE_TYPE_STICKERS);
                         } else {
                             imageView.setSticker(null);
-                            imageView.setEmojiId(documentId);
+                            imageView.setEmojiId(documentId, currentType == PAGE_TYPE_STICKERS);
                         }
                     } else {
-                        imageView.setEmoji(null);
+                        imageView.setEmoji(null, currentType == PAGE_TYPE_STICKERS);
                         imageView.setSticker(document);
                     }
                 } else if (viewType == VIEW_TYPE_NOT_FOUND) {
@@ -1219,7 +1418,9 @@ public class EmojiBottomSheet extends BottomSheet implements NotificationCenter.
     }
 
     public void showPremiumBulletin(String text) {
-        container.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
+        try {
+            container.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
+        } catch (Exception ignored) {}
         BulletinFactory.of(container, resourcesProvider).createSimpleBulletin(
                 R.raw.star_premium_2,
                 LocaleController.getString(R.string.IncreaseLimit),
@@ -1276,7 +1477,7 @@ public class EmojiBottomSheet extends BottomSheet implements NotificationCenter.
     }
 
     public boolean hasWidgets() {
-        return onWidgetSelected != null && (canShowWidget(WIDGET_LOCATION) || canShowWidget(WIDGET_AUDIO) || canShowWidget(WIDGET_PHOTO) || canShowWidget(WIDGET_REACTION));
+        return onWidgetSelected != null && (canShowWidget(WIDGET_LOCATION) || canShowWidget(WIDGET_AUDIO) || canShowWidget(WIDGET_PHOTO) || canShowWidget(WIDGET_REACTION) || canShowWidget(WIDGET_LINK));
     }
 
     @Override
@@ -1305,8 +1506,9 @@ public class EmojiBottomSheet extends BottomSheet implements NotificationCenter.
                     return;
                 }
             }
-            onWidgetSelected.run(id);
-            dismiss();
+            if (onWidgetSelected.run(id)) {
+                dismiss();
+            }
         }
     }
 
@@ -1318,16 +1520,18 @@ public class EmojiBottomSheet extends BottomSheet implements NotificationCenter.
     private TabsView tabsView;
     private float maxPadding = -1;
     private final boolean onlyStickers;
+    private final boolean greeting;
 
 //    private final GestureDetector gestureDetector;
     private boolean wasKeyboardVisible;
 
     public static int savedPosition = 1;
 
-    public EmojiBottomSheet(Context context, boolean onlyStickers, Theme.ResourcesProvider resourcesProvider) {
+    public EmojiBottomSheet(Context context, boolean onlyStickers, Theme.ResourcesProvider resourcesProvider, boolean greeting) {
         super(context, true, resourcesProvider);
 
         this.onlyStickers = onlyStickers;
+        this.greeting = greeting;
 
         useSmoothKeyboard = true;
         fixNavigationBar(Theme.getColor(Theme.key_dialogBackground, resourcesProvider));
@@ -1338,7 +1542,7 @@ public class EmojiBottomSheet extends BottomSheet implements NotificationCenter.
         containerView = new ContainerView(context);
         viewPager = new ViewPagerFixed(context) {
             @Override
-            protected void onTabAnimationUpdate(boolean manual) {
+            public void onTabAnimationUpdate(boolean manual) {
                 if (tabsView != null) {
                     tabsView.setType(viewPager.getPositionAnimated());
                 }
@@ -1405,11 +1609,13 @@ public class EmojiBottomSheet extends BottomSheet implements NotificationCenter.
         if (!onlyStickers) {
             MediaDataController.getInstance(currentAccount).checkStickers(MediaDataController.TYPE_EMOJIPACKS);
             MediaDataController.getInstance(currentAccount).checkFeaturedEmoji();
+            MediaDataController.getInstance(currentAccount).loadRecents(MediaDataController.TYPE_IMAGE, true, true, false);
         }
 
         MediaDataController.getInstance(currentAccount).checkStickers(MediaDataController.TYPE_IMAGE);
         MediaDataController.getInstance(currentAccount).loadRecents(MediaDataController.TYPE_IMAGE, false, true, false);
         MediaDataController.getInstance(currentAccount).loadRecents(MediaDataController.TYPE_FAVE, false, true, false);
+        MediaDataController.getInstance(currentAccount).loadRecents(MediaDataController.TYPE_PREMIUM_STICKERS, false, true, false);
     }
 
     public void closeKeyboard() {
@@ -1594,13 +1800,27 @@ public class EmojiBottomSheet extends BottomSheet implements NotificationCenter.
         return (int) (containerView.getMeasuredHeight() - viewPager.getY());
     }
 
-    private Utilities.Callback3<Object, TLRPC.Document, Boolean> onDocumentSelected;
-    public EmojiBottomSheet whenDocumentSelected(Utilities.Callback3<Object, TLRPC.Document, Boolean> listener) {
+    private Utilities.Callback3Return<Object, TLRPC.Document, Boolean, Boolean> onDocumentSelected;
+    private Runnable onPlusSelected;
+    public EmojiBottomSheet whenDocumentSelected(Utilities.Callback3Return<Object, TLRPC.Document, Boolean, Boolean> listener) {
         this.onDocumentSelected = listener;
         return this;
     }
-    private Utilities.Callback<Integer> onWidgetSelected;
-    public EmojiBottomSheet whenWidgetSelected(Utilities.Callback<Integer> listener) {
+    private Utilities.CallbackReturn<Integer, Boolean> onWidgetSelected;
+
+    public EmojiBottomSheet whenPlusSelected(Runnable listener) {
+        this.onPlusSelected = listener;
+        View[] pages = viewPager.getViewPages();
+        for (int i = 0; i < pages.length; ++i) {
+            View view = pages[i];
+            if (view instanceof Page) {
+                Page page = (Page) view;
+                page.adapter.update();
+            }
+        }
+        return this;
+    }
+    public EmojiBottomSheet whenWidgetSelected(Utilities.CallbackReturn<Integer, Boolean> listener) {
         this.onWidgetSelected = listener;
         View[] pages = viewPager.getViewPages();
         for (int i = 0; i < pages.length; ++i) {
@@ -1625,8 +1845,8 @@ public class EmojiBottomSheet extends BottomSheet implements NotificationCenter.
             public boolean emoji;
 
             private final int currentAccount = UserConfig.selectedAccount;
-            private final EmojiListView listView;
             public AnimatedEmojiDrawable drawable;
+            private final EmojiListView listView;
             public ImageReceiver imageReceiver;
             private long documentId;
 
@@ -1641,7 +1861,25 @@ public class EmojiBottomSheet extends BottomSheet implements NotificationCenter.
                 this.listView = parent;
             }
 
-            public void setEmoji(TLRPC.Document document) {
+            public void setDrawable(Drawable drawable) {
+                if (this.drawable != null) {
+                    this.drawable.removeView(this);
+                }
+                this.drawable = null;
+                documentId = 0;
+                emoji = false;
+                if (imageReceiver == null) {
+                    imageReceiver = new ImageReceiver();
+                    imageReceiver.setLayerNum(7);
+                    imageReceiver.setAspectFit(true);
+                    if (attached) {
+                        imageReceiver.onAttachedToWindow();
+                    }
+                }
+                imageReceiver.setImageBitmap(drawable);
+            }
+
+            public void setEmoji(TLRPC.Document document, boolean isSticker) {
                 if (documentId == (document == null ? 0 : document.id)) {
                     return;
                 }
@@ -1651,7 +1889,7 @@ public class EmojiBottomSheet extends BottomSheet implements NotificationCenter.
                 if (document != null) {
                     emoji = true;
                     documentId = document.id;
-                    drawable = AnimatedEmojiDrawable.make(currentAccount, AnimatedEmojiDrawable.CACHE_TYPE_ALERT_PREVIEW, document);
+                    drawable = AnimatedEmojiDrawable.make(currentAccount, getCacheType(isSticker), document);
                     if (attached) {
                         drawable.addView(this);
                     }
@@ -1667,7 +1905,7 @@ public class EmojiBottomSheet extends BottomSheet implements NotificationCenter.
                 listView.invalidate();
             }
 
-            public void setEmojiId(long documentId) {
+            public void setEmojiId(long documentId, boolean isSticker) {
                 if (this.documentId == documentId) {
                     return;
                 }
@@ -1677,7 +1915,7 @@ public class EmojiBottomSheet extends BottomSheet implements NotificationCenter.
                 if (documentId != 0) {
                     emoji = true;
                     this.documentId = documentId;
-                    drawable = AnimatedEmojiDrawable.make(currentAccount, AnimatedEmojiDrawable.CACHE_TYPE_ALERT_PREVIEW, documentId);
+                    drawable = AnimatedEmojiDrawable.make(currentAccount, getCacheType(isSticker), documentId);
                     if (attached) {
                         drawable.addView(this);
                     }
@@ -1720,6 +1958,9 @@ public class EmojiBottomSheet extends BottomSheet implements NotificationCenter.
                     String filter = "80_80";
                     if ("video/webm".equals(document.mime_type)) {
                         filter += "_" + ImageLoader.AUTOPLAY_FILTER;
+                    }
+                    if (!LiteMode.isEnabled(LiteMode.FLAG_ANIMATED_STICKERS_KEYBOARD)) {
+                        filter += "_firstframe";
                     }
 //                    if (svgThumb != null) {
 //                        svgThumb.overrideWidthAndHeight(512, 512);
@@ -2189,7 +2430,9 @@ public class EmojiBottomSheet extends BottomSheet implements NotificationCenter.
 
         private final FrameLayout inputBox;
         private final EditTextBoldCursor editText;
-        private final StickerCategoriesListView categoriesListView;
+        private int categoriesListViewType = -1;
+        @Nullable
+        private StickerCategoriesListView categoriesListView;
         private boolean clearVisible;
         private final ImageView clear;
 
@@ -2253,7 +2496,7 @@ public class EmojiBottomSheet extends BottomSheet implements NotificationCenter.
             editText.setLines(1);
             editText.setSingleLine(true);
             editText.setImeOptions(EditorInfo.IME_ACTION_SEARCH | EditorInfo.IME_FLAG_NO_EXTRACT_UI);
-            editText.setHint(LocaleController.getString("Search", R.string.Search));
+            editText.setHint(LocaleController.getString(R.string.Search));
             editText.setCursorColor(Theme.getColor(Theme.key_featuredStickers_addedIcon, resourcesProvider));
             editText.setHandlesColor(Theme.getColor(Theme.key_featuredStickers_addedIcon, resourcesProvider));
             editText.setCursorSize(dp(20));
@@ -2304,70 +2547,6 @@ public class EmojiBottomSheet extends BottomSheet implements NotificationCenter.
                 }
             });
 
-            categoriesListView = new StickerCategoriesListView(context, null, StickerCategoriesListView.CategoriesType.DEFAULT, resourcesProvider) {
-                @Override
-                public void selectCategory(int categoryIndex) {
-                    super.selectCategory(categoryIndex);
-//                    if (type == 1 && emojiTabs != null) {
-//                        emojiTabs.showSelected(categoriesListView.getSelectedCategory() == null);
-//                    } else if (type == 0 && stickersTab != null) {
-//                        stickersTab.showSelected(categoriesListView.getSelectedCategory() == null);
-//                    }
-                    updateButton();
-                }
-
-                @Override
-                protected boolean isTabIconsAnimationEnabled(boolean loaded) {
-                    return LiteMode.isEnabled(LiteMode.FLAG_ANIMATED_EMOJI_REACTIONS);
-                }
-            };
-            categoriesListView.setDontOccupyWidth((int) (editText.getPaint().measureText(editText.getHint() + "")) + dp(16));
-            categoriesListView.setOnScrollIntoOccupiedWidth(scrolled -> {
-                editText.animate().cancel();
-                editText.setTranslationX(-Math.max(0, scrolled));
-//                showInputBoxGradient(scrolled > 0);
-                updateButton();
-            });
-//            categoriesListView.setOnTouchListener(new OnTouchListener() {
-//                @Override
-//                public boolean onTouch(View v, MotionEvent event) {
-////                    if (event.getAction() == MotionEvent.ACTION_DOWN) {
-////                        ignorePagerScroll = true;
-////                    } else if (event.getAction() == MotionEvent.ACTION_UP || event.getAction() == MotionEvent.ACTION_CANCEL) {
-////                        ignorePagerScroll = false;
-////                    }
-//                    return false;
-//                }
-//            });
-            categoriesListView.setOnCategoryClick(category -> {
-//                if (category == recent) {
-////                    showInputBoxGradient(false);
-//                    categoriesListView.selectCategory(recent);
-//                    gifSearchField.searchEditText.setText("");
-//                    gifLayoutManager.scrollToPositionWithOffset(0, 0);
-//                    return;
-//                } else
-//                if (category == trending) {
-////                    showInputBoxGradient(false);
-//                    gifSearchField.searchEditText.setText("");
-//                    gifLayoutManager.scrollToPositionWithOffset(gifAdapter.trendingSectionItem, -dp(4));
-//                    categoriesListView.selectCategory(trending);
-//                    final ArrayList<String> gifSearchEmojies = MessagesController.getInstance(currentAccount).gifSearchEmojies;
-//                    if (!gifSearchEmojies.isEmpty()) {
-//                        gifSearchPreloader.preload(gifSearchEmojies.get(0));
-//                    }
-//                    return;
-//                }
-                if (categoriesListView.getSelectedCategory() == category) {
-                    categoriesListView.selectCategory(null);
-                    search(null, -1);
-                } else {
-                    categoriesListView.selectCategory(category);
-                    search(category.emojis, categoriesListView.getCategoryIndex());
-                }
-            });
-            box.addView(categoriesListView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 36, Gravity.LEFT | Gravity.TOP, 36, 0, 0, 0));
-
             clear = new ImageView(context);
             clear.setScaleType(ImageView.ScaleType.CENTER);
             clear.setImageDrawable(new CloseProgressDrawable2(1.25f) {
@@ -2389,11 +2568,73 @@ public class EmojiBottomSheet extends BottomSheet implements NotificationCenter.
             searchImageView.setOnClickListener(e -> {
                 if (searchImageDrawable.getIconState() == SearchStateDrawable.State.STATE_BACK) {
                     clear();
-                    categoriesListView.scrollToStart();
+                    if (categoriesListView != null) {
+                        categoriesListView.scrollToStart();
+                    }
                 } else if (searchImageDrawable.getIconState() == SearchStateDrawable.State.STATE_SEARCH) {
                     editText.requestFocus();
                 }
             });
+        }
+
+        public void checkCategoriesView(int type, boolean greeting) {
+            if (categoriesListViewType == type && categoriesListView != null) return;
+            if (categoriesListView != null) {
+                box.removeView(categoriesListView);
+            }
+            categoriesListView = new StickerCategoriesListView(getContext(), null, type == PAGE_TYPE_STICKERS ? StickerCategoriesListView.CategoriesType.STICKERS : StickerCategoriesListView.CategoriesType.DEFAULT, resourcesProvider) {
+                @Override
+                public void selectCategory(int categoryIndex) {
+                    super.selectCategory(categoryIndex);
+                    updateButton();
+                }
+
+                @Override
+                protected EmojiCategory[] preprocessCategories(EmojiCategory[] categories) {
+                    if (categories != null && greeting) {
+                        int index = -1;
+                        for (int i = 0; i < categories.length; ++i) {
+                            if (categories[i] != null && categories[i].greeting) {
+                                index = i;
+                                break;
+                            }
+                        }
+                        if (index >= 0) {
+                            EmojiCategory[] newCategories = new EmojiCategory[categories.length];
+                            newCategories[0] = categories[index];
+                            for (int i = 1; i < newCategories.length; ++i) {
+                                newCategories[i] = categories[i <= index ? i - 1 : i];
+                            }
+                            return newCategories;
+                        }
+                    }
+                    return categories;
+                }
+
+                @Override
+                protected boolean isTabIconsAnimationEnabled(boolean loaded) {
+                    return LiteMode.isEnabled(LiteMode.FLAG_ANIMATED_EMOJI_REACTIONS);
+                }
+            };
+            categoriesListView.setDontOccupyWidth((int) (editText.getPaint().measureText(editText.getHint() + "")) + dp(16));
+            categoriesListView.setOnScrollIntoOccupiedWidth(scrolled -> {
+                editText.animate().cancel();
+                editText.setTranslationX(-Math.max(0, scrolled));
+                updateButton();
+            });
+            categoriesListView.setOnCategoryClick(category -> {
+                if (categoriesListView == null) {
+                    return;
+                }
+                if (categoriesListView.getSelectedCategory() == category) {
+                    categoriesListView.selectCategory(null);
+                    search(null, -1);
+                } else {
+                    categoriesListView.selectCategory(category);
+                    search(category.emojis, categoriesListView.getCategoryIndex());
+                }
+            });
+            box.addView(categoriesListView, Math.max(0, box.getChildCount() - 1), LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 36, Gravity.LEFT | Gravity.TOP, 36, 0, 0, 0));
         }
 
         private void updateButton() {
@@ -2412,7 +2653,7 @@ public class EmojiBottomSheet extends BottomSheet implements NotificationCenter.
 
         private void updateButton(boolean force) {
             if (!isprogress || editText.length() == 0 && (categoriesListView == null || categoriesListView.getSelectedCategory() == null) || force) {
-                boolean backButton = editText.length() > 0 || categoriesListView != null && categoriesListView.isCategoriesShown() && (categoriesListView.isScrolledIntoOccupiedWidth() || categoriesListView.getSelectedCategory() != null);
+                boolean backButton = editText.length() > 0 || categoriesListView != null && categoriesListView.isCategoriesShown() && (categoriesListView != null && categoriesListView.isScrolledIntoOccupiedWidth() || categoriesListView.getSelectedCategory() != null);
                 searchImageDrawable.setIconState(backButton ? SearchStateDrawable.State.STATE_BACK : SearchStateDrawable.State.STATE_SEARCH);
                 isprogress = false;
             }
@@ -2440,7 +2681,9 @@ public class EmojiBottomSheet extends BottomSheet implements NotificationCenter.
         private void clear() {
             editText.setText("");
             search(null, -1);
-            categoriesListView.selectCategory(null);
+            if (categoriesListView != null) {
+                categoriesListView.selectCategory(null);
+            }
         }
     }
 
@@ -2490,7 +2733,7 @@ public class EmojiBottomSheet extends BottomSheet implements NotificationCenter.
 
         private void updateLayouts() {
             textPaint.setTextSize(dp(14));
-            textPaint.setTypeface(AndroidUtilities.getTypeface(AndroidUtilities.TYPEFACE_ROBOTO_MEDIUM));
+            textPaint.setTypeface(AndroidUtilities.bold());
 
             emojiLayout = new StaticLayout(LocaleController.getString("Emoji"), textPaint, getMeasuredWidth(), Layout.Alignment.ALIGN_NORMAL, 1, 0, false);
             emojiLayoutWidth = emojiLayout.getLineCount() >= 1 ? emojiLayout.getLineWidth(0) : 0;
@@ -2500,7 +2743,7 @@ public class EmojiBottomSheet extends BottomSheet implements NotificationCenter.
             stickersLayoutWidth = stickersLayout.getLineCount() >= 1 ? stickersLayout.getLineWidth(0) : 0;
             stickersLayoutLeft = stickersLayout.getLineCount() >= 1 ? stickersLayout.getLineLeft(0) : 0;
 
-            gifsLayout = new StaticLayout(LocaleController.getString("AccDescrGIFs", R.string.AccDescrGIFs), textPaint, getMeasuredWidth(), Layout.Alignment.ALIGN_NORMAL, 1, 0, false);
+            gifsLayout = new StaticLayout(LocaleController.getString(R.string.AccDescrGIFs), textPaint, getMeasuredWidth(), Layout.Alignment.ALIGN_NORMAL, 1, 0, false);
             gifsLayoutWidth = gifsLayout.getLineCount() >= 1 ? gifsLayout.getLineWidth(0) : 0;
             gifsLayoutLeft = gifsLayout.getLineCount() >= 1 ? gifsLayout.getLineLeft(0) : 0;
 
@@ -2593,7 +2836,7 @@ public class EmojiBottomSheet extends BottomSheet implements NotificationCenter.
             textView = new TextView(context);
             textView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
             textView.setTextColor(-8553090); // Theme.getColor(Theme.key_chat_emojiPanelEmptyText, resourcesProvider)
-            textView.setText(emoji ? LocaleController.getString("NoEmojiFound", R.string.NoEmojiFound) : LocaleController.getString("NoStickersFound", R.string.NoStickersFound));
+            textView.setText(emoji ? LocaleController.getString(R.string.NoEmojiFound) : LocaleController.getString(R.string.NoStickersFound));
             addView(textView, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER, 0, 18 + 16, 0, 0));
         }
 
@@ -2622,6 +2865,8 @@ public class EmojiBottomSheet extends BottomSheet implements NotificationCenter.
     public static final int WIDGET_AUDIO = 1;
     public static final int WIDGET_PHOTO = 2;
     public static final int WIDGET_REACTION = 3;
+    public static final int WIDGET_LINK = 4;
+    public static final int WIDGET_WEATHER = 5;
 
     private class StoryWidgetsCell extends View {
 
@@ -2639,12 +2884,30 @@ public class EmojiBottomSheet extends BottomSheet implements NotificationCenter.
         public StoryWidgetsCell(Context context) {
             super(context);
             setPadding(0, 0, 0, 0);
+            if (canShowWidget(WIDGET_LINK))
+                widgets.add(new Button(WIDGET_LINK, R.drawable.msg_limit_links, LocaleController.getString(R.string.StoryWidgetLink)).needsPremium());
             if (canShowWidget(WIDGET_LOCATION))
                 widgets.add(new Button(WIDGET_LOCATION, R.drawable.map_pin3, LocaleController.getString(R.string.StoryWidgetLocation)));
+            if (canShowWidget(WIDGET_WEATHER)) {
+                Weather.State weather = Weather.getCached();
+                Button[] btn = new Button[] { null };
+                CharSequence text = Emoji.replaceEmoji((weather == null ? "🌤" : weather.getEmoji()) + " " + (weather == null ? (Weather.isDefaultCelsius() ? "24°C" : "72°F") : weather.getTemperature()), textPaint.getFontMetricsInt(), false);
+                if (MessagesController.getInstance(currentAccount).storyWeatherPreload && PermissionRequest.hasPermission(Manifest.permission.ACCESS_COARSE_LOCATION) && weather == null) {
+                    text = new SpannableStringBuilder("___");
+                    ((SpannableStringBuilder) text).setSpan(new LoadingSpan(this, dp(68)), 0, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                    btn[0] = new Button(this, WIDGET_WEATHER, text);
+                    Weather.fetch(false, state -> {
+                        btn[0].setText(Emoji.replaceEmoji((state == null ? "🌤" : state.getEmoji()) + " " + (state == null ? (Weather.isDefaultCelsius() ? "24°C" : "72°F") : state.getTemperature()), textPaint.getFontMetricsInt(), false));
+                        invalidate();
+                        requestLayout();
+                    });
+                }
+                widgets.add(btn[0] == null ? new Button(this, WIDGET_WEATHER, text) : btn[0]);
+            }
             if (canShowWidget(WIDGET_AUDIO))
                 widgets.add(new Button(WIDGET_AUDIO, R.drawable.filled_widget_music, LocaleController.getString(R.string.StoryWidgetAudio)));
             if (canShowWidget(WIDGET_PHOTO))
-                widgets.add(new Button(WIDGET_PHOTO, R.drawable.files_gallery, LocaleController.getString(R.string.StoryWidgetPhoto)));
+                widgets.add(new Button(WIDGET_PHOTO, R.drawable.filled_premium_camera, LocaleController.getString(R.string.StoryWidgetPhoto)));
             if (canShowWidget(WIDGET_REACTION))
                 widgets.add(new ReactionWidget());
         }
@@ -2656,6 +2919,7 @@ public class EmojiBottomSheet extends BottomSheet implements NotificationCenter.
             int layoutLine = 0;
             RectF bounds = new RectF();
             ButtonBounce bounce = new ButtonBounce(StoryWidgetsCell.this);
+            public AnimatedFloat animatedWidth = new AnimatedFloat(StoryWidgetsCell.this, 350, CubicBezierInterpolator.EASE_OUT_QUINT);
 
             abstract void draw(Canvas canvas, float left, float top);
 
@@ -2666,10 +2930,15 @@ public class EmojiBottomSheet extends BottomSheet implements NotificationCenter.
         }
 
         private class Button extends BaseWidget {
+
+            String emojiDrawable;
             Drawable drawable;
+            Drawable lockDrawable;
             StaticLayout layout;
             float textWidth;
             float textLeft;
+            Paint lockPaint;
+
 
             public Button(int id, int iconId, String string) {
                 this.id = id;
@@ -2684,20 +2953,82 @@ public class EmojiBottomSheet extends BottomSheet implements NotificationCenter.
                 this.height = dpf2(36);
             }
 
+            public Button(View view, int id, CharSequence text) {
+                this.id = id;
+                text = TextUtils.ellipsize(text, textPaint, AndroidUtilities.displaySize.x * .8f, TextUtils.TruncateAt.END);
+                this.layout = new StaticLayout(text, textPaint, 99999, Layout.Alignment.ALIGN_NORMAL, 1f, 0f, false);
+                this.textWidth = this.layout.getLineCount() > 0 ? this.layout.getLineWidth(0) : 0;
+                this.textLeft = this.layout.getLineCount() > 0 ? this.layout.getLineLeft(0) : 0;
+                this.width = dpf2(6 + 6) + this.textWidth;
+                this.height = dpf2(36);
+            }
+
+            public void setText(CharSequence text) {
+                text = TextUtils.ellipsize(text, textPaint, AndroidUtilities.displaySize.x * .8f, TextUtils.TruncateAt.END);
+                this.layout = new StaticLayout(text, textPaint, 99999, Layout.Alignment.ALIGN_NORMAL, 1f, 0f, false);
+                this.textWidth = this.layout.getLineCount() > 0 ? this.layout.getLineWidth(0) : 0;
+                this.textLeft = this.layout.getLineCount() > 0 ? this.layout.getLineLeft(0) : 0;
+                this.width = dpf2(6 + 11.6f) + this.textWidth;
+                this.height = dpf2(36);
+            }
+
+            public Button needsPremium() {
+                if (!UserConfig.getInstance(currentAccount).isPremium()) {
+                    lockDrawable = getContext().getResources().getDrawable(R.drawable.msg_mini_lock3).mutate();
+                    lockDrawable.setColorFilter(new PorterDuffColorFilter(Theme.multAlpha(Color.WHITE, .60f), PorterDuff.Mode.SRC_IN));
+                    lockPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+                    lockPaint.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.CLEAR));
+                }
+                return this;
+            }
+
             public void draw(Canvas canvas, float left, float top) {
                 bounds.set(left, top, left + width, top + height);
                 final float scale = bounce.getScale(.05f);
                 canvas.save();
                 canvas.scale(scale, scale, bounds.centerX(), bounds.centerY());
                 canvas.drawRoundRect(bounds, dp(8), dp(8), bgPaint);
-                drawable.setBounds(
-                    (int) (bounds.left + dp(6)),
-                    (int) (bounds.top + height / 2 - dp(24) / 2),
-                    (int) (bounds.left + dp(6 + 24)),
-                    (int) (bounds.top + height / 2 + dp(24) / 2)
-                );
-                drawable.draw(canvas);
-                canvas.translate(bounds.left + dp(6 + 24 + 4) - textLeft, bounds.top + height / 2 - layout.getHeight() / 2f);
+                if (lockDrawable != null) {
+                    canvas.saveLayerAlpha(bounds, 0xFF, Canvas.ALL_SAVE_FLAG);
+                }
+                if (drawable == null) {
+                    drawable = Emoji.getEmojiBigDrawable(emojiDrawable);
+                    if (this.drawable instanceof Emoji.EmojiDrawable) {
+                        ((Emoji.EmojiDrawable) this.drawable).fullSize = false;
+                    }
+                }
+                if (drawable != null) {
+                    int sz = dp(emojiDrawable == null ? 24 : 22);
+                    drawable.setBounds(
+                            (int) (bounds.left + dp(6 + 12) - sz / 2),
+                            (int) (bounds.top + height / 2 - sz / 2),
+                            (int) (bounds.left + dp(6 + 12) + sz / 2),
+                            (int) (bounds.top + height / 2 + sz / 2)
+                    );
+                    drawable.draw(canvas);
+                }
+                if (lockDrawable != null) {
+                    AndroidUtilities.rectTmp.set(
+                        bounds.left + dp(6 + 24 - 12 + .55f),
+                        bounds.top + height - dp(5) - dp(12 + .55f),
+                        bounds.left + dp(6 + 24 - .55f),
+                        bounds.left + dp(6 + 24 + 1)
+                    );
+                    canvas.drawRoundRect(
+                        AndroidUtilities.rectTmp,
+                        dp(6), dp(6),
+                        lockPaint
+                    );
+                    lockDrawable.setBounds(
+                            (int) (bounds.left + dp(6 + 24 - 12)),
+                            (int) (bounds.top + height - dp(5) - dp(12)),
+                            (int) (bounds.left + dp(6 + 24)),
+                            (int) (bounds.top + height - dp(5))
+                    );
+                    lockDrawable.draw(canvas);
+                    canvas.restore();
+                }
+                canvas.translate(bounds.left + dp(6 + (drawable == null && emojiDrawable == null ? 0 : 24 + 4)) - textLeft, bounds.top + height / 2 - layout.getHeight() / 2f);
                 layout.draw(canvas);
                 canvas.restore();
             }
@@ -2814,7 +3145,7 @@ public class EmojiBottomSheet extends BottomSheet implements NotificationCenter.
             float x = 0;
 
             final int width = MeasureSpec.getSize(widthMeasureSpec);
-            final int availableWidth = (int) ((width - getPaddingLeft() - getPaddingRight()) * 0.8f);
+            final int availableWidth = (int) (width - getPaddingLeft() - getPaddingRight());
 
             for (final BaseWidget widget : widgets) {
                 widget.layoutX = x;
@@ -2846,6 +3177,19 @@ public class EmojiBottomSheet extends BottomSheet implements NotificationCenter.
 
         @Override
         protected void dispatchDraw(Canvas canvas) {
+            try {
+                for (int i = 0; i < lineWidths.length; ++i) {
+                    lineWidths[i] = 0;
+                }
+                for (final BaseWidget widget : widgets) {
+                    final int i = widget.layoutLine - 1;
+                    if (lineWidths[i] > 0)
+                        lineWidths[i] += dp(10);
+                    lineWidths[i] += widget.animatedWidth.set(widget.width);
+                }
+            } catch (Exception e) {
+                FileLog.e(e);
+            }
             for (final BaseWidget widget : widgets) {
                 final float left = getPaddingLeft() + ((getMeasuredWidth() - getPaddingLeft() - getPaddingRight() - lineWidths[widget.layoutLine - 1]) / 2f) + widget.layoutX;
                 final float top = dp(12) + (widget.layoutLine - 1) * dp(36 + 12);
@@ -2899,5 +3243,10 @@ public class EmojiBottomSheet extends BottomSheet implements NotificationCenter.
                 widget.onAttachToWindow(false);
             }
         }
+    }
+
+    public static int getCacheType(boolean stickers) {
+        return LiteMode.isEnabled(stickers ? LiteMode.FLAG_ANIMATED_STICKERS_KEYBOARD : LiteMode.FLAG_ANIMATED_EMOJI_KEYBOARD) ?
+            AnimatedEmojiDrawable.CACHE_TYPE_ALERT_PREVIEW : AnimatedEmojiDrawable.CACHE_TYPE_ALERT_PREVIEW_STATIC;
     }
 }

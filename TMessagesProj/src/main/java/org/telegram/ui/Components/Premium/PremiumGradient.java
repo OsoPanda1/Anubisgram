@@ -27,6 +27,7 @@ import org.telegram.ui.ActionBar.Theme;
 public class PremiumGradient {
 
     private final PremiumGradientTools mainGradient = new PremiumGradientTools(Theme.key_premiumGradient1, Theme.key_premiumGradient2, Theme.key_premiumGradient3, Theme.key_premiumGradient4);
+    private final PremiumGradientTools goldGradient = new PremiumGradientTools(Theme.key_starsGradient1, Theme.key_starsGradient2, -1);
 //    private final GradientTools grayGradient = new GradientTools(Theme.key_windowBackgroundWhiteGrayText7, Theme.key_windowBackgroundWhiteGrayText7, Theme.key_windowBackgroundWhiteGrayText7);
     private final Paint mainGradientPaint = mainGradient.paint;
     Paint lockedPremiumPaint;
@@ -41,6 +42,7 @@ public class PremiumGradient {
     public InternalDrawable premiumStarMenuDrawable;
     public InternalDrawable premiumStarMenuDrawable2;
     public InternalDrawable premiumStarMenuDrawableGray;
+    public InternalDrawable goldenStarMenuDrawable;
 
     private int lastStarColor;
 
@@ -54,6 +56,7 @@ public class PremiumGradient {
     private PremiumGradient() {
         premiumStarDrawableMini = ContextCompat.getDrawable(ApplicationLoader.applicationContext, R.drawable.msg_premium_liststar).mutate();
         premiumStarMenuDrawable = createGradientDrawable(ContextCompat.getDrawable(ApplicationLoader.applicationContext, R.drawable.msg_settings_premium));
+        goldenStarMenuDrawable = createGradientDrawable(ContextCompat.getDrawable(ApplicationLoader.applicationContext, R.drawable.msg_settings_premium), goldGradient);
         premiumStarMenuDrawable2 = createGradientDrawable(ContextCompat.getDrawable(ApplicationLoader.applicationContext, R.drawable.msg_premium_normal));
 //        premiumStarMenuDrawableGray = createGradientDrawable(ContextCompat.getDrawable(ApplicationLoader.applicationContext, R.drawable.msg_settings_premium), grayGradient);
         premiumStarColoredDrawable = ContextCompat.getDrawable(ApplicationLoader.applicationContext, R.drawable.msg_premium_liststar).mutate();
@@ -155,7 +158,7 @@ public class PremiumGradient {
         public float cx = 0.5f;
         public float cy = 0.5f;
         Shader shader;
-        Matrix matrix = new Matrix();
+        final Matrix matrix = new Matrix();
         public final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
 
         final int colorKey1, colorKey2, colorKey3, colorKey4, colorKey5;
@@ -241,7 +244,7 @@ public class PremiumGradient {
             int c3 = colorKey3 < 0 ? 0 : getColor(colorKey3);
             int c4 = colorKey4 < 0 ? 0 : getColor(colorKey4);
             int c5 = colorKey5 < 0 ? 0 : getColor(colorKey5);
-            if (colors[0] != c1 || colors[1] != c2 || colors[2] != c3 || colors[3] != c4 || colors[4] != c5) {
+            if (shader == null || colors[0] != c1 || colors[1] != c2 || colors[2] != c3 || colors[3] != c4 || colors[4] != c5) {
                 colors[0] = c1;
                 colors[1] = c2;
                 colors[2] = c3;

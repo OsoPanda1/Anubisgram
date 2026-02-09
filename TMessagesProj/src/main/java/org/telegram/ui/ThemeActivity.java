@@ -9,6 +9,7 @@
 package org.telegram.ui;
 
 import static org.telegram.messenger.AndroidUtilities.dp;
+import static org.telegram.messenger.LocaleController.getString;
 
 import android.Manifest;
 import android.animation.ObjectAnimator;
@@ -22,8 +23,6 @@ import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Canvas;
 import android.graphics.Paint;
-import android.graphics.PorterDuff;
-import android.graphics.PorterDuffColorFilter;
 import android.graphics.drawable.Drawable;
 import android.location.Address;
 import android.location.Geocoder;
@@ -42,6 +41,7 @@ import android.view.ViewGroup;
 import android.view.accessibility.AccessibilityNodeInfo;
 import android.widget.Button;
 import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
@@ -54,7 +54,6 @@ import androidx.recyclerview.widget.RecyclerView;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ApplicationLoader;
-import org.telegram.messenger.Emoji;
 import org.telegram.messenger.FileLoader;
 import org.telegram.messenger.FileLog;
 import org.telegram.messenger.LocaleController;
@@ -63,15 +62,16 @@ import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
 import org.telegram.messenger.SharedConfig;
-import org.telegram.messenger.UserObject;
 import org.telegram.messenger.Utilities;
 import org.telegram.messenger.time.SunDate;
 import org.telegram.tgnet.TLRPC;
+import org.telegram.tgnet.tl.TL_account;
 import org.telegram.ui.ActionBar.ActionBar;
 import org.telegram.ui.ActionBar.ActionBarMenu;
 import org.telegram.ui.ActionBar.ActionBarMenuItem;
 import org.telegram.ui.ActionBar.AlertDialog;
 import org.telegram.ui.ActionBar.BaseFragment;
+import org.telegram.ui.ActionBar.BottomSheet;
 import org.telegram.ui.ActionBar.EmojiThemes;
 import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.ActionBar.ThemeColors;
@@ -93,20 +93,28 @@ import org.telegram.ui.Cells.ThemePreviewMessagesCell;
 import org.telegram.ui.Cells.ThemeTypeCell;
 import org.telegram.ui.Cells.ThemesHorizontalListCell;
 import org.telegram.ui.Components.AlertsCreator;
-import org.telegram.ui.Components.AvatarDrawable;
+import org.telegram.ui.Components.BulletinFactory;
 import org.telegram.ui.Components.CubicBezierInterpolator;
 import org.telegram.ui.Components.LayoutHelper;
+import org.telegram.ui.Components.PermissionRequest;
 import org.telegram.ui.Components.RLottieDrawable;
 import org.telegram.ui.Components.RecyclerListView;
 import org.telegram.ui.Components.SeekBarView;
 import org.telegram.ui.Components.ShareAlert;
 import org.telegram.ui.Components.SimpleThemeDescription;
 import org.telegram.ui.Components.SwipeGestureSettingsView;
-import org.telegram.ui.Components.Text;
+import org.telegram.ui.Components.TextHelper;
 import org.telegram.ui.Components.ThemeEditorView;
+import org.telegram.ui.Stories.recorder.ButtonWithCounterView;
+import org.telegram.ui.bots.BotWebViewAttachedSheet;
+import org.telegram.ui.bots.BotWebViewSheet;
+import org.telegram.ui.bots.WebViewRequestProps;
+import org.telegram.ui.web.SearchEngine;
+import org.telegram.ui.web.WebBrowserSettings;
 
 import java.io.File;
 import java.io.FileOutputStream;
+import java.security.Permission;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Collections;
@@ -142,8 +150,8 @@ public class ThemeActivity extends BaseFragment implements NotificationCenter.No
     private int textSizeHeaderRow;
     private int textSizeRow;
     private int settingsRow;
-    private int customTabsRow;
     private int directShareRow;
+    private int sensitiveContentRow;
     private int raiseToSpeakRow;
     private int raiseToListenRow;
     private int nextMediaTapRow;
@@ -152,6 +160,7 @@ public class ThemeActivity extends BaseFragment implements NotificationCenter.No
     private int saveToGalleryOption2Row;
     private int saveToGallerySectionRow;
     private int distanceRow;
+    private int searchEngineRow;
     private int bluetoothScoRow;
     private int enableAnimationsRow;
     private int settings2Row;
@@ -161,6 +170,7 @@ public class ThemeActivity extends BaseFragment implements NotificationCenter.No
     private int contactsSortRow;
 
     private int nightThemeRow;
+    private int browserRow;
     private int nightDisabledRow;
     private int nightScheduledRow;
     private int nightAutomaticRow;
@@ -222,6 +232,7 @@ public class ThemeActivity extends BaseFragment implements NotificationCenter.No
 
     private boolean updateRecordViaSco;
     private boolean updateDistance;
+    private boolean updateSearchEngine;
 
     private GpsLocationListener gpsLocationListener = new GpsLocationListener();
     private GpsLocationListener networkLocationListener = new GpsLocationListener();
@@ -233,6 +244,12 @@ public class ThemeActivity extends BaseFragment implements NotificationCenter.No
     private final static int day_night_switch = 5;
 
     private RLottieDrawable sunDrawable;
+
+    private boolean highlightSensitiveRow;
+    public ThemeActivity highlightSensitiveRow() {
+        this.highlightSensitiveRow = true;
+        return this;
+    }
 
     private class GpsLocationListener implements LocationListener {
 
@@ -514,6 +531,7 @@ public class ThemeActivity extends BaseFragment implements NotificationCenter.No
         nightTypeInfoRow = -1;
         scheduleHeaderRow = -1;
         nightThemeRow = -1;
+        browserRow = -1;
         newThemeInfoRow = -1;
         scheduleFromRow = -1;
         scheduleToRow = -1;
@@ -551,8 +569,8 @@ public class ThemeActivity extends BaseFragment implements NotificationCenter.No
         backgroundRow = -1;
         changeUserColor = -1;
         settingsRow = -1;
-        customTabsRow = -1;
         directShareRow = -1;
+        sensitiveContentRow = -1;
         enableAnimationsRow = -1;
         raiseToSpeakRow = -1;
         raiseToListenRow = -1;
@@ -562,6 +580,7 @@ public class ThemeActivity extends BaseFragment implements NotificationCenter.No
         saveToGalleryOption2Row = -1;
         saveToGallerySectionRow = -1;
         distanceRow = -1;
+        searchEngineRow = -1;
         bluetoothScoRow = -1;
         settings2Row = -1;
 
@@ -648,6 +667,7 @@ public class ThemeActivity extends BaseFragment implements NotificationCenter.No
             swipeGestureInfoRow = rowCount++;
 
             nightThemeRow = rowCount++;
+            browserRow = rowCount++;
             liteModeRow = rowCount++;
             stickersRow = rowCount++;
             stickersSectionRow = rowCount++;
@@ -664,8 +684,11 @@ public class ThemeActivity extends BaseFragment implements NotificationCenter.No
             mediaSoundSectionRow = rowCount++;
 
             otherHeaderRow = rowCount++;
-            customTabsRow = rowCount++;
             directShareRow = rowCount++;
+            TL_account.contentSettings contentSettings = getMessagesController().getContentSettings();
+            if (contentSettings != null && contentSettings.sensitive_can_change) {
+                sensitiveContentRow = rowCount++;
+            }
             sendByEnterRow = rowCount++;
             distanceRow = rowCount++;
             otherSectionRow = rowCount++;
@@ -804,6 +827,8 @@ public class ThemeActivity extends BaseFragment implements NotificationCenter.No
         NotificationCenter.getGlobalInstance().addObserver(this, NotificationCenter.needShareTheme);
         NotificationCenter.getGlobalInstance().addObserver(this, NotificationCenter.needSetDayNightTheme);
         NotificationCenter.getGlobalInstance().addObserver(this, NotificationCenter.emojiPreviewThemesChanged);
+        getNotificationCenter().addObserver(this, NotificationCenter.appConfigUpdated);
+        getNotificationCenter().addObserver(this, NotificationCenter.contentSettingsLoaded);
         getNotificationCenter().addObserver(this, NotificationCenter.themeUploadedToServer);
         getNotificationCenter().addObserver(this, NotificationCenter.themeUploadError);
         if (currentType == THEME_TYPE_BASIC) {
@@ -825,6 +850,8 @@ public class ThemeActivity extends BaseFragment implements NotificationCenter.No
         NotificationCenter.getGlobalInstance().removeObserver(this, NotificationCenter.needShareTheme);
         NotificationCenter.getGlobalInstance().removeObserver(this, NotificationCenter.needSetDayNightTheme);
         NotificationCenter.getGlobalInstance().removeObserver(this, NotificationCenter.emojiPreviewThemesChanged);
+        getNotificationCenter().removeObserver(this, NotificationCenter.appConfigUpdated);
+        getNotificationCenter().removeObserver(this, NotificationCenter.contentSettingsLoaded);
         getNotificationCenter().removeObserver(this, NotificationCenter.themeUploadedToServer);
         getNotificationCenter().removeObserver(this, NotificationCenter.themeUploadError);
         Theme.saveAutoNightThemeConfig();
@@ -881,6 +908,10 @@ public class ThemeActivity extends BaseFragment implements NotificationCenter.No
             if (themeListRow2 >= 0) {
                 listAdapter.notifyItemChanged(themeListRow2);
             }
+        } else if (id == NotificationCenter.contentSettingsLoaded || id == NotificationCenter.appConfigUpdated) {
+            if (sensitiveContentRow >= 0) {
+                listAdapter.notifyItemChanged(sensitiveContentRow);
+            }
         }
     }
 
@@ -894,7 +925,7 @@ public class ThemeActivity extends BaseFragment implements NotificationCenter.No
             actionBar.setOccupyStatusBar(false);
         }
         if (currentType == THEME_TYPE_THEMES_BROWSER) {
-            actionBar.setTitle(LocaleController.getString("BrowseThemes", R.string.BrowseThemes));
+            actionBar.setTitle(getString("BrowseThemes", R.string.BrowseThemes));
             ActionBarMenu menu = actionBar.createMenu();
             sunDrawable = new RLottieDrawable(R.raw.sun, "" + R.raw.sun, dp(28), dp(28), true, null);
             if (lastIsDarkTheme) {
@@ -905,16 +936,28 @@ public class ThemeActivity extends BaseFragment implements NotificationCenter.No
             sunDrawable.setPlayInDirectionOfCustomEndFrame(true);
             menuItem = menu.addItem(day_night_switch, sunDrawable);
         } else if (currentType == THEME_TYPE_BASIC) {
-            actionBar.setTitle(LocaleController.getString("ChatSettings", R.string.ChatSettings));
+            actionBar.setTitle(getString("ChatSettings", R.string.ChatSettings));
             ActionBarMenu menu = actionBar.createMenu();
             menuItem = menu.addItem(0, R.drawable.ic_ab_other);
-            menuItem.setContentDescription(LocaleController.getString("AccDescrMoreOptions", R.string.AccDescrMoreOptions));
-            menuItem.addSubItem(share_theme, R.drawable.msg_share, LocaleController.getString("ShareTheme", R.string.ShareTheme));
-            menuItem.addSubItem(edit_theme, R.drawable.msg_edit, LocaleController.getString("EditThemeColors", R.string.EditThemeColors));
-            menuItem.addSubItem(create_theme, R.drawable.msg_palette, LocaleController.getString("CreateNewThemeMenu", R.string.CreateNewThemeMenu));
-            menuItem.addSubItem(reset_settings, R.drawable.msg_reset, LocaleController.getString("ThemeResetToDefaults", R.string.ThemeResetToDefaults));
+            menuItem.setContentDescription(getString("AccDescrMoreOptions", R.string.AccDescrMoreOptions));
+            menuItem.addSubItem(share_theme, R.drawable.msg_share, getString("ShareTheme", R.string.ShareTheme));
+            menuItem.addSubItem(edit_theme, R.drawable.msg_edit, getString("EditThemeColors", R.string.EditThemeColors));
+            menuItem.addSubItem(create_theme, R.drawable.msg_palette, getString("CreateNewThemeMenu", R.string.CreateNewThemeMenu));
+            menuItem.addSubItem(reset_settings, R.drawable.msg_reset, getString("ThemeResetToDefaults", R.string.ThemeResetToDefaults));
+
+            if (getMessagesController().getContentSettings() == null) {
+                getMessagesController().getContentSettings(settings -> {
+                    if (listView != null && listView.isAttachedToWindow() && listAdapter != null) {
+                        if ((sensitiveContentRow >= 0) == (settings != null && settings.sensitive_can_change)) {
+                            listAdapter.notifyItemChanged(sensitiveContentRow);
+                        } else {
+                            updateRows(true);
+                        }
+                    }
+                });
+            }
         } else {
-            actionBar.setTitle(LocaleController.getString("AutoNightTheme", R.string.AutoNightTheme));
+            actionBar.setTitle(getString("AutoNightTheme", R.string.AutoNightTheme));
         }
 
         actionBar.setActionBarMenuOnItemClick(new ActionBar.ActionBarMenuOnItemClick() {
@@ -941,9 +984,9 @@ public class ThemeActivity extends BaseFragment implements NotificationCenter.No
                         return;
                     }
                     AlertDialog.Builder builder1 = new AlertDialog.Builder(getParentActivity());
-                    builder1.setTitle(LocaleController.getString("ThemeResetToDefaultsTitle", R.string.ThemeResetToDefaultsTitle));
-                    builder1.setMessage(LocaleController.getString("ThemeResetToDefaultsText", R.string.ThemeResetToDefaultsText));
-                    builder1.setPositiveButton(LocaleController.getString("Reset", R.string.Reset), (dialogInterface, i) -> {
+                    builder1.setTitle(getString("ThemeResetToDefaultsTitle", R.string.ThemeResetToDefaultsTitle));
+                    builder1.setMessage(getString("ThemeResetToDefaultsText", R.string.ThemeResetToDefaultsText));
+                    builder1.setPositiveButton(getString("Reset", R.string.Reset), (dialogInterface, i) -> {
                         boolean changed = false;
                         if (setFontSize(AndroidUtilities.isTablet() ? 18 : 16)) {
                             changed = true;
@@ -980,7 +1023,7 @@ public class ThemeActivity extends BaseFragment implements NotificationCenter.No
                             }
                         }
                     });
-                    builder1.setNegativeButton(LocaleController.getString("Cancel", R.string.Cancel), null);
+                    builder1.setNegativeButton(getString("Cancel", R.string.Cancel), null);
                     AlertDialog alertDialog = builder1.create();
                     showDialog(alertDialog);
                     TextView button = (TextView) alertDialog.getButton(DialogInterface.BUTTON_POSITIVE);
@@ -1106,9 +1149,9 @@ public class ThemeActivity extends BaseFragment implements NotificationCenter.No
                 linearLayout.setOrientation(LinearLayout.VERTICAL);
 
                 CharSequence[] items = new CharSequence[]{
-                    LocaleController.getString("DistanceUnitsAutomatic", R.string.DistanceUnitsAutomatic),
-                    LocaleController.getString("DistanceUnitsKilometers", R.string.DistanceUnitsKilometers),
-                    LocaleController.getString("DistanceUnitsMiles", R.string.DistanceUnitsMiles)
+                    getString("DistanceUnitsAutomatic", R.string.DistanceUnitsAutomatic),
+                    getString("DistanceUnitsKilometers", R.string.DistanceUnitsKilometers),
+                    getString("DistanceUnitsMiles", R.string.DistanceUnitsMiles)
                 };
 
                 for (int i = 0; i < items.length; ++i) {
@@ -1131,9 +1174,50 @@ public class ThemeActivity extends BaseFragment implements NotificationCenter.No
                 }
 
                 Dialog dialog = new AlertDialog.Builder(getParentActivity())
-                        .setTitle(LocaleController.getString("DistanceUnitsTitle", R.string.DistanceUnitsTitle))
+                        .setTitle(getString("DistanceUnitsTitle", R.string.DistanceUnitsTitle))
                         .setView(linearLayout)
-                        .setNegativeButton(LocaleController.getString("Cancel", R.string.Cancel), null)
+                        .setNegativeButton(getString("Cancel", R.string.Cancel), null)
+                        .create();
+                dialogRef.set(dialog);
+                showDialog(dialog);
+            } else if (position == searchEngineRow) {
+                if (getParentActivity() == null) {
+                    return;
+                }
+                AtomicReference<Dialog> dialogRef = new AtomicReference<>();
+
+                LinearLayout linearLayout = new LinearLayout(context);
+                linearLayout.setOrientation(LinearLayout.VERTICAL);
+
+                ArrayList<SearchEngine> searchEngines = SearchEngine.getSearchEngines();
+                CharSequence[] items = new CharSequence[ searchEngines.size() ];
+
+                for (int i = 0; i < items.length; ++i) {
+                    final SearchEngine engine = searchEngines.get(i);
+                    items[i] = engine.name;
+
+                    final int index = i;
+                    RadioColorCell cell = new RadioColorCell(getParentActivity());
+                    cell.setPadding(dp(4), 0, dp(4), 0);
+                    cell.setCheckColor(Theme.getColor(Theme.key_radioBackground), Theme.getColor(Theme.key_dialogRadioBackgroundChecked));
+                    cell.setTextAndValue(items[index], index == SharedConfig.searchEngineType);
+                    cell.setBackground(Theme.createSelectorDrawable(Theme.getColor(Theme.key_listSelector), Theme.RIPPLE_MASK_ALL));
+                    linearLayout.addView(cell);
+                    cell.setOnClickListener(v -> {
+                        SharedConfig.setSearchEngineType(index);
+                        updateSearchEngine = true;
+                        RecyclerView.ViewHolder holder = listView.findViewHolderForAdapterPosition(searchEngineRow);
+                        if (holder != null) {
+                            listAdapter.onBindViewHolder(holder, searchEngineRow);
+                        }
+                        dialogRef.get().dismiss();
+                    });
+                }
+
+                Dialog dialog = new AlertDialog.Builder(getParentActivity())
+                        .setTitle(getString(R.string.SearchEngine))
+                        .setView(linearLayout)
+                        .setNegativeButton(getString("Cancel", R.string.Cancel), null)
                         .create();
                 dialogRef.set(dialog);
                 showDialog(dialog);
@@ -1149,7 +1233,7 @@ public class ThemeActivity extends BaseFragment implements NotificationCenter.No
                 RadioColorCell cell = new RadioColorCell(getParentActivity());
                 cell.setPadding(dp(4), 0, dp(4), 0);
                 cell.setCheckColor(Theme.getColor(Theme.key_radioBackground), Theme.getColor(Theme.key_dialogRadioBackgroundChecked));
-                cell.setTextAndValue(LocaleController.getString(R.string.MicrophoneForVoiceMessagesBuiltIn), !SharedConfig.recordViaSco);
+                cell.setTextAndValue(getString(R.string.MicrophoneForVoiceMessagesBuiltIn), !SharedConfig.recordViaSco);
                 cell.setBackground(Theme.createSelectorDrawable(Theme.getColor(Theme.key_listSelector), Theme.RIPPLE_MASK_ALL));
                 linearLayout.addView(cell);
                 cell.setOnClickListener(v -> {
@@ -1167,10 +1251,26 @@ public class ThemeActivity extends BaseFragment implements NotificationCenter.No
                 cell = new RadioColorCell(getParentActivity());
                 cell.setPadding(dp(4), 0, dp(4), 0);
                 cell.setCheckColor(Theme.getColor(Theme.key_radioBackground), Theme.getColor(Theme.key_dialogRadioBackgroundChecked));
-                cell.setTextAndText2AndValue(LocaleController.getString(R.string.MicrophoneForVoiceMessagesScoIfConnected), LocaleController.getString(R.string.MicrophoneForVoiceMessagesScoHint), SharedConfig.recordViaSco);
+                cell.setTextAndText2AndValue(getString(R.string.MicrophoneForVoiceMessagesScoIfConnected), getString(R.string.MicrophoneForVoiceMessagesScoHint), SharedConfig.recordViaSco);
                 cell.setBackground(Theme.createSelectorDrawable(Theme.getColor(Theme.key_listSelector), Theme.RIPPLE_MASK_ALL));
                 linearLayout.addView(cell);
                 cell.setOnClickListener(v -> {
+                    PermissionRequest.ensurePermission(R.raw.permission_request_microphone, R.string.PermissionNoBluetoothWithHint, Manifest.permission.BLUETOOTH_CONNECT, granted -> {
+                        if (!granted) {
+                            SharedConfig.recordViaSco = false;
+                            SharedConfig.saveConfig();
+                            updateRecordViaSco = true;
+                            dialogRef.get().dismiss();
+
+                            if (listView != null && listView.isAttachedToWindow()) {
+                                RecyclerView.ViewHolder holder = listView.findViewHolderForAdapterPosition(bluetoothScoRow);
+                                if (holder != null) {
+                                    listAdapter.onBindViewHolder(holder, bluetoothScoRow);
+                                }
+                            }
+                        }
+                    });
+
                     SharedConfig.recordViaSco = true;
                     SharedConfig.saveConfig();
                     updateRecordViaSco = true;
@@ -1183,21 +1283,48 @@ public class ThemeActivity extends BaseFragment implements NotificationCenter.No
                 });
 
                 Dialog dialog = new AlertDialog.Builder(getParentActivity())
-                        .setTitle(LocaleController.getString(R.string.MicrophoneForVoiceMessages))
+                        .setTitle(getString(R.string.MicrophoneForVoiceMessages))
                         .setView(linearLayout)
-                        .setNegativeButton(LocaleController.getString("Cancel", R.string.Cancel), null)
+                        .setNegativeButton(getString("Cancel", R.string.Cancel), null)
                         .create();
                 dialogRef.set(dialog);
                 showDialog(dialog);
-            } else if (position == customTabsRow) {
-                SharedConfig.toggleCustomTabs();
-                if (view instanceof TextCheckCell) {
-                    ((TextCheckCell) view).setChecked(SharedConfig.customTabs);
-                }
             } else if (position == directShareRow) {
                 SharedConfig.toggleDirectShare();
                 if (view instanceof TextCheckCell) {
                     ((TextCheckCell) view).setChecked(SharedConfig.directShare);
+                }
+            } else if (position == sensitiveContentRow) {
+                if (!getMessagesController().showSensitiveContent()) {
+                    Runnable set = () -> {
+                        getMessagesController().setContentSettings(true);
+                        if (view instanceof TextCheckCell) {
+                            ((TextCheckCell) view).setChecked(getMessagesController().showSensitiveContent());
+                        }
+                    };
+                    showDialog(
+                        new AlertDialog.Builder(context, resourceProvider)
+                            .setTitle(getString(R.string.ConfirmSensitiveContentTitle))
+                            .setMessage(getString(R.string.ConfirmSensitiveContentText))
+                            .setPositiveButton(getString(R.string.Confirm), (di, w) -> {
+                                verifyAge(getContext(), currentAccount, passed -> {
+                                    if (passed) {
+                                        set.run();
+                                    } else {
+                                        BulletinFactory.of(this)
+                                            .createSimpleBulletin(R.raw.error, getString(R.string.AgeVerificationFailedTitle), getString(R.string.AgeVerificationFailedText))
+                                            .show();
+                                    }
+                                }, getResourceProvider());
+                            })
+                            .setNegativeButton(getString(R.string.Cancel), null)
+                            .create()
+                    );
+                } else {
+                    getMessagesController().setContentSettings(false);
+                    if (view instanceof TextCheckCell) {
+                        ((TextCheckCell) view).setChecked(getMessagesController().showSensitiveContent());
+                    }
                 }
             } else if (position == contactsReimportRow) {
                 //not implemented
@@ -1206,11 +1333,11 @@ public class ThemeActivity extends BaseFragment implements NotificationCenter.No
                     return;
                 }
                 AlertDialog.Builder builder = new AlertDialog.Builder(getParentActivity());
-                builder.setTitle(LocaleController.getString("SortBy", R.string.SortBy));
+                builder.setTitle(getString("SortBy", R.string.SortBy));
                 builder.setItems(new CharSequence[]{
-                        LocaleController.getString("Default", R.string.Default),
-                        LocaleController.getString("SortFirstName", R.string.SortFirstName),
-                        LocaleController.getString("SortLastName", R.string.SortLastName)
+                        getString("Default", R.string.Default),
+                        getString("SortFirstName", R.string.SortFirstName),
+                        getString("SortLastName", R.string.SortLastName)
                 }, (dialog, which) -> {
                     SharedPreferences preferences = MessagesController.getGlobalMainSettings();
                     SharedPreferences.Editor editor = preferences.edit();
@@ -1220,7 +1347,7 @@ public class ThemeActivity extends BaseFragment implements NotificationCenter.No
                         listAdapter.notifyItemChanged(position);
                     }
                 });
-                builder.setNegativeButton(LocaleController.getString("Cancel", R.string.Cancel), null);
+                builder.setNegativeButton(getString("Cancel", R.string.Cancel), null);
                 showDialog(builder.create());
             } else if (position == chatBlurRow) {
                 SharedConfig.toggleChatBlur();
@@ -1240,21 +1367,29 @@ public class ThemeActivity extends BaseFragment implements NotificationCenter.No
                     Theme.saveAutoNightThemeConfig();
                     Theme.checkAutoNightThemeConditions(true);
                     boolean enabled = Theme.selectedAutoNightType != Theme.AUTO_NIGHT_TYPE_NONE;
-                    String value = enabled ? Theme.getCurrentNightThemeName() : LocaleController.getString("AutoNightThemeOff", R.string.AutoNightThemeOff);
+                    String value = enabled ? Theme.getCurrentNightThemeName() : getString("AutoNightThemeOff", R.string.AutoNightThemeOff);
                     if (enabled) {
                         String type;
                         if (Theme.selectedAutoNightType == Theme.AUTO_NIGHT_TYPE_SCHEDULED) {
-                            type = LocaleController.getString("AutoNightScheduled", R.string.AutoNightScheduled);
+                            type = getString("AutoNightScheduled", R.string.AutoNightScheduled);
                         } else if (Theme.selectedAutoNightType == Theme.AUTO_NIGHT_TYPE_SYSTEM) {
-                            type = LocaleController.getString("AutoNightSystemDefault", R.string.AutoNightSystemDefault);
+                            type = getString("AutoNightSystemDefault", R.string.AutoNightSystemDefault);
                         } else {
-                            type = LocaleController.getString("AutoNightAdaptive", R.string.AutoNightAdaptive);
+                            type = getString("AutoNightAdaptive", R.string.AutoNightAdaptive);
                         }
                         value = type + " " + value;
                     }
-                    checkCell.setTextAndValueAndIconAndCheck(LocaleController.getString("AutoNightTheme", R.string.AutoNightTheme), value, R.drawable.msg2_night_auto, enabled, 0, false, true);
+                    checkCell.setTextAndValueAndIconAndCheck(getString("AutoNightTheme", R.string.AutoNightTheme), value, R.drawable.msg2_night_auto, enabled, 0, false, true);
                 } else {
                     presentFragment(new ThemeActivity(THEME_TYPE_NIGHT));
+                }
+            } else if (position == browserRow) {
+                if (LocaleController.isRTL && x <= dp(76) || !LocaleController.isRTL && x >= view.getMeasuredWidth() - dp(76)) {
+                    NotificationsCheckCell checkCell = (NotificationsCheckCell) view;
+                    SharedConfig.toggleInappBrowser();
+                    checkCell.setChecked(SharedConfig.inappBrowser);
+                } else {
+                    presentFragment(new WebBrowserSettings(null));
                 }
             } else if (position == nightDisabledRow) {
                 if (Theme.selectedAutoNightType == Theme.AUTO_NIGHT_TYPE_NONE) {
@@ -1314,10 +1449,10 @@ public class ThemeActivity extends BaseFragment implements NotificationCenter.No
                     int time = hourOfDay * 60 + minute;
                     if (position == scheduleFromRow) {
                         Theme.autoNightDayStartTime = time;
-                        cell.setTextAndValue(LocaleController.getString("AutoNightFrom", R.string.AutoNightFrom), String.format("%02d:%02d", hourOfDay, minute), true);
+                        cell.setTextAndValue(getString("AutoNightFrom", R.string.AutoNightFrom), String.format("%02d:%02d", hourOfDay, minute), true);
                     } else {
                         Theme.autoNightDayEndTime = time;
-                        cell.setTextAndValue(LocaleController.getString("AutoNightTo", R.string.AutoNightTo), String.format("%02d:%02d", hourOfDay, minute), true);
+                        cell.setTextAndValue(getString("AutoNightTo", R.string.AutoNightTo), String.format("%02d:%02d", hourOfDay, minute), true);
                     }
                 }, currentHour, currentMinute, true);
                 showDialog(dialog);
@@ -1342,6 +1477,15 @@ public class ThemeActivity extends BaseFragment implements NotificationCenter.No
             listView.setItemAnimator(itemAnimator);
         }
 
+        if (highlightSensitiveRow) {
+            updateRows(false);
+            highlightSensitiveRow = false;
+            listView.scrollToPosition(listAdapter.getItemCount() - 1);
+            AndroidUtilities.runOnUIThread(() -> {
+                listView.highlightRow(() -> sensitiveContentRow);
+            }, 200);
+        }
+
         return fragmentView;
     }
 
@@ -1356,10 +1500,10 @@ public class ThemeActivity extends BaseFragment implements NotificationCenter.No
             return;
         }
         AlertDialog.Builder builder = new AlertDialog.Builder(getParentActivity());
-        builder.setTitle(LocaleController.getString("NewTheme", R.string.NewTheme));
-        builder.setMessage(LocaleController.getString("CreateNewThemeAlert", R.string.CreateNewThemeAlert));
-        builder.setNegativeButton(LocaleController.getString("Cancel", R.string.Cancel), null);
-        builder.setPositiveButton(LocaleController.getString("CreateTheme", R.string.CreateTheme), (dialog, which) -> AlertsCreator.createThemeCreateDialog(ThemeActivity.this, 0, null, null));
+        builder.setTitle(getString("NewTheme", R.string.NewTheme));
+        builder.setMessage(getString("CreateNewThemeAlert", R.string.CreateNewThemeAlert));
+        builder.setNegativeButton(getString("Cancel", R.string.Cancel), null);
+        builder.setPositiveButton(getString("CreateTheme", R.string.CreateTheme), (dialog, which) -> AlertsCreator.createThemeCreateDialog(ThemeActivity.this, 0, null, null));
         showDialog(builder.create());
     }
 
@@ -1377,6 +1521,110 @@ public class ThemeActivity extends BaseFragment implements NotificationCenter.No
             AndroidUtilities.requestAdjustResize(getParentActivity(), classGuid);
             AndroidUtilities.setAdjustResizeToNothing(getParentActivity(), classGuid);
         }
+    }
+
+    public static void verifyAge(Context context, int currentAccount, Utilities.Callback<Boolean> done, Theme.ResourcesProvider resourcesProvider) {
+        final MessagesController messagesController = MessagesController.getInstance(currentAccount);
+        final String username = messagesController.verifyAgeBotUsername;
+        final String country = messagesController.verifyAgeCountry;
+        final int minAge = messagesController.verifyAgeMin;
+        if (TextUtils.isEmpty(username) || !messagesController.config.needAgeVideoVerification.get()) {
+            done.run(true);
+            return;
+        }
+
+        final BottomSheet.Builder b = new BottomSheet.Builder(context, false, resourcesProvider);
+        final BottomSheet[] sheet = new BottomSheet[1];
+
+        LinearLayout layout = new LinearLayout(context);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setPadding(dp(12), 0, dp(12), 0);
+        layout.setClipChildren(false);
+        layout.setClipToPadding(false);
+        b.setCustomView(layout);
+
+        FrameLayout topView = new FrameLayout(context);
+        topView.setBackground(Theme.createCircleDrawable(dp(80), Theme.getColor(Theme.key_featuredStickers_addButton, resourcesProvider)));
+        ImageView imageView = new ImageView(context);
+        imageView.setScaleType(ImageView.ScaleType.CENTER);
+        imageView.setImageResource(R.drawable.filled_verify_age);
+        topView.addView(imageView, LayoutHelper.createFrame(50, 50, Gravity.CENTER));
+        layout.addView(topView, LayoutHelper.createLinear(80, 80, Gravity.CENTER_HORIZONTAL, 0, 20, 0, 8));
+
+        TextView textView = TextHelper.makeTextView(context, 20, Theme.key_dialogTextBlack, true, resourcesProvider);
+        textView.setText(getString(R.string.AgeVerificationTitle));
+        textView.setGravity(Gravity.CENTER);
+        layout.addView(textView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.FILL_HORIZONTAL, 24, 8, 24, 8));
+
+        textView = TextHelper.makeTextView(context, 14, Theme.key_dialogTextBlack, false, resourcesProvider);
+        textView.setText(AndroidUtilities.replaceTags(getString("AgeVerificationText" + country)));
+        textView.setGravity(Gravity.CENTER);
+        layout.addView(textView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.FILL_HORIZONTAL, 24, 0, 24, 0));
+
+        ButtonWithCounterView button = new ButtonWithCounterView(context, resourcesProvider);
+        button.setText(getString(R.string.AgeVerificationButton), false);
+        button.setOnClickListener(v -> {
+            if (button.isLoading()) return;
+            button.setLoading(true);
+
+            PermissionRequest.ensurePermission(
+                R.raw.permission_request_camera,
+                R.string.AgeVerificationNeedCameraPermission,
+                Manifest.permission.CAMERA,
+                granted -> {
+                    if (!granted) {
+                        button.setLoading(false);
+                        return;
+                    }
+
+                    messagesController.getUserNameResolver().resolve(username, userId -> {
+                        if (userId == null) {
+                            button.setLoading(false);
+                            return;
+                        }
+                        final TLRPC.User bot = messagesController.getUser(userId);
+                        if (bot == null) {
+                            button.setLoading(false);
+                            return;
+                        }
+
+                        BaseFragment lastFragment = LaunchActivity.getSafeLastFragment();
+                        if (lastFragment == null) {
+                            button.setLoading(false);
+                            return;
+                        }
+
+                        final WebViewRequestProps props = WebViewRequestProps.of(currentAccount, userId, userId, null, null, BotWebViewAttachedSheet.TYPE_WEB_VIEW_BOT_MAIN, 0, 0L, false, null, false, null, bot, 0, false, false);
+                        final BotWebViewSheet webViewSheet = new BotWebViewSheet(context, resourcesProvider);
+                        webViewSheet.setOnVerifiedAge((localPassed, age, gender, genderProbability) -> {
+                            final boolean passed = age != null ? age >= minAge : localPassed;
+
+                            webViewSheet.dismiss();
+                            done.run(passed);
+
+                            final BaseFragment lastFragment2 = LaunchActivity.getSafeLastFragment();
+                            if (passed && lastFragment2 != null) {
+                                BulletinFactory.of(lastFragment2)
+                                    .createSimpleBulletin(R.raw.contact_check, getString(R.string.AgeVerificationPassedTitle))
+                                    .show();
+                            }
+                        });
+                        webViewSheet.setDefaultFullsize(true);
+                        webViewSheet.setNeedsContext(false);
+                        webViewSheet.setParentActivity(lastFragment.getParentActivity());
+                        webViewSheet.requestWebView(lastFragment, props);
+                        webViewSheet.show();
+
+                        button.setLoading(false);
+                        sheet[0].dismiss();
+                    });
+                }
+            );
+        });
+        layout.addView(button, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 48, Gravity.FILL_HORIZONTAL, 2, 29, 2, 14));
+
+        sheet[0] = b.show();
+        sheet[0].fixNavigationBar();
     }
 
     private void updateMenuItem() {
@@ -1421,8 +1669,8 @@ public class ThemeActivity extends BaseFragment implements NotificationCenter.No
                 if (!lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
                     AlertDialog.Builder builder = new AlertDialog.Builder(getParentActivity());
                     builder.setTopAnimation(R.raw.permission_request_location, AlertsCreator.PERMISSIONS_REQUEST_TOP_ICON_SIZE, false, Theme.getColor(Theme.key_dialogTopBackground));
-                    builder.setMessage(LocaleController.getString("GpsDisabledAlertText", R.string.GpsDisabledAlertText));
-                    builder.setPositiveButton(LocaleController.getString("ConnectingToProxyEnable", R.string.ConnectingToProxyEnable), (dialog, id) -> {
+                    builder.setMessage(getString("GpsDisabledAlertText", R.string.GpsDisabledAlertText));
+                    builder.setPositiveButton(getString("ConnectingToProxyEnable", R.string.ConnectingToProxyEnable), (dialog, id) -> {
                         if (getParentActivity() == null) {
                             return;
                         }
@@ -1432,7 +1680,7 @@ public class ThemeActivity extends BaseFragment implements NotificationCenter.No
 
                         }
                     });
-                    builder.setNegativeButton(LocaleController.getString("Cancel", R.string.Cancel), null);
+                    builder.setNegativeButton(getString("Cancel", R.string.Cancel), null);
                     showDialog(builder.create());
                     return;
                 }
@@ -1489,7 +1737,7 @@ public class ThemeActivity extends BaseFragment implements NotificationCenter.No
                 if (listView != null) {
                     RecyclerListView.Holder holder = (RecyclerListView.Holder) listView.findViewHolderForAdapterPosition(scheduleUpdateLocationRow);
                     if (holder != null && holder.itemView instanceof TextSettingsCell) {
-                        ((TextSettingsCell) holder.itemView).setTextAndValue(LocaleController.getString("AutoNightUpdateLocation", R.string.AutoNightUpdateLocation), Theme.autoNightCityName, false);
+                        ((TextSettingsCell) holder.itemView).setTextAndValue(getString("AutoNightUpdateLocation", R.string.AutoNightUpdateLocation), Theme.autoNightCityName, false);
                     }
                 }
             });
@@ -1629,7 +1877,7 @@ public class ThemeActivity extends BaseFragment implements NotificationCenter.No
         @Override
         public void onInitializeAccessibilityNodeInfo(AccessibilityNodeInfo info) {
             super.onInitializeAccessibilityNodeInfo(info);
-            info.setText(LocaleController.getString("ColorPickerMainColor", R.string.ColorPickerMainColor));
+            info.setText(getString("ColorPickerMainColor", R.string.ColorPickerMainColor));
             info.setClassName(Button.class.getName());
             info.setChecked(checked);
             info.setCheckable(true);
@@ -1689,7 +1937,7 @@ public class ThemeActivity extends BaseFragment implements NotificationCenter.No
         @Override
         public void onInitializeAccessibilityNodeInfo(AccessibilityNodeInfo info) {
             super.onInitializeAccessibilityNodeInfo(info);
-            info.setText(LocaleController.getString("ColorPickerMainColor", R.string.ColorPickerMainColor));
+            info.setText(getString("ColorPickerMainColor", R.string.ColorPickerMainColor));
             info.setClassName(Button.class.getName());
             info.setEnabled(true);
         }
@@ -1817,7 +2065,7 @@ public class ThemeActivity extends BaseFragment implements NotificationCenter.No
                 hasDelete = false;
                 items = new CharSequence[]{
                         null,
-                        LocaleController.getString("ExportTheme", R.string.ExportTheme)
+                        getString("ExportTheme", R.string.ExportTheme)
                 };
                 icons = new int[]{
                         0,
@@ -1826,11 +2074,11 @@ public class ThemeActivity extends BaseFragment implements NotificationCenter.No
             } else {
                 hasDelete = themeInfo.info == null || !themeInfo.info.isDefault;
                 items = new CharSequence[]{
-                        LocaleController.getString("ShareFile", R.string.ShareFile),
-                        LocaleController.getString("ExportTheme", R.string.ExportTheme),
-                        themeInfo.info == null || !themeInfo.info.isDefault && themeInfo.info.creator ? LocaleController.getString("Edit", R.string.Edit) : null,
-                        themeInfo.info != null && themeInfo.info.creator ? LocaleController.getString("ThemeSetUrl", R.string.ThemeSetUrl) : null,
-                        hasDelete ? LocaleController.getString("Delete", R.string.Delete) : null};
+                        getString("ShareFile", R.string.ShareFile),
+                        getString("ExportTheme", R.string.ExportTheme),
+                        themeInfo.info == null || !themeInfo.info.isDefault && themeInfo.info.creator ? getString("Edit", R.string.Edit) : null,
+                        themeInfo.info != null && themeInfo.info.creator ? getString("ThemeSetUrl", R.string.ThemeSetUrl) : null,
+                        hasDelete ? getString("Delete", R.string.Delete) : null};
                 icons = new int[]{
                         R.drawable.msg_share,
                         R.drawable.msg_shareout,
@@ -1901,7 +2149,7 @@ public class ThemeActivity extends BaseFragment implements NotificationCenter.No
                         } else {
                             intent.putExtra(Intent.EXTRA_STREAM, Uri.fromFile(finalFile));
                         }
-                        startActivityForResult(Intent.createChooser(intent, LocaleController.getString("ShareFile", R.string.ShareFile)), 500);
+                        startActivityForResult(Intent.createChooser(intent, getString("ShareFile", R.string.ShareFile)), 500);
                     } catch (Exception e) {
                         FileLog.e(e);
                     }
@@ -1918,16 +2166,16 @@ public class ThemeActivity extends BaseFragment implements NotificationCenter.No
                         return;
                     }
                     AlertDialog.Builder builder1 = new AlertDialog.Builder(getParentActivity());
-                    builder1.setTitle(LocaleController.getString("DeleteThemeTitle", R.string.DeleteThemeTitle));
-                    builder1.setMessage(LocaleController.getString("DeleteThemeAlert", R.string.DeleteThemeAlert));
-                    builder1.setPositiveButton(LocaleController.getString("Delete", R.string.Delete), (dialogInterface, i) -> {
+                    builder1.setTitle(getString("DeleteThemeTitle", R.string.DeleteThemeTitle));
+                    builder1.setMessage(getString("DeleteThemeAlert", R.string.DeleteThemeAlert));
+                    builder1.setPositiveButton(getString("Delete", R.string.Delete), (dialogInterface, i) -> {
                         MessagesController.getInstance(themeInfo.account).saveTheme(themeInfo, null, themeInfo == Theme.getCurrentNightTheme(), true);
                         if (Theme.deleteTheme(themeInfo)) {
                             parentLayout.rebuildAllFragmentViews(true, true);
                         }
                         NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.themeListUpdated);
                     });
-                    builder1.setNegativeButton(LocaleController.getString("Cancel", R.string.Cancel), null);
+                    builder1.setNegativeButton(getString("Cancel", R.string.Cancel), null);
                     AlertDialog alertDialog = builder1.create();
                     showDialog(alertDialog);
                     TextView button = (TextView) alertDialog.getButton(DialogInterface.BUTTON_POSITIVE);
@@ -2091,10 +2339,10 @@ public class ThemeActivity extends BaseFragment implements NotificationCenter.No
                         if (accent.id >= 100 && !accent.isDefault) {
                             AlertDialog.Builder builder = new AlertDialog.Builder(getParentActivity());
                             CharSequence[] items = new CharSequence[]{
-                                    LocaleController.getString("OpenInEditor", R.string.OpenInEditor),
-                                    LocaleController.getString("ShareTheme", R.string.ShareTheme),
-                                    accent.info != null && accent.info.creator ? LocaleController.getString("ThemeSetUrl", R.string.ThemeSetUrl) : null,
-                                    LocaleController.getString("DeleteTheme", R.string.DeleteTheme)
+                                    getString("OpenInEditor", R.string.OpenInEditor),
+                                    getString("ShareTheme", R.string.ShareTheme),
+                                    accent.info != null && accent.info.creator ? getString("ThemeSetUrl", R.string.ThemeSetUrl) : null,
+                                    getString("DeleteTheme", R.string.DeleteTheme)
                             };
                             int[] icons = new int[]{
                                     R.drawable.msg_edit,
@@ -2123,15 +2371,15 @@ public class ThemeActivity extends BaseFragment implements NotificationCenter.No
                                         return;
                                     }
                                     AlertDialog.Builder builder1 = new AlertDialog.Builder(getParentActivity());
-                                    builder1.setTitle(LocaleController.getString("DeleteThemeTitle", R.string.DeleteThemeTitle));
-                                    builder1.setMessage(LocaleController.getString("DeleteThemeAlert", R.string.DeleteThemeAlert));
-                                    builder1.setPositiveButton(LocaleController.getString("Delete", R.string.Delete), (dialogInterface, i) -> {
+                                    builder1.setTitle(getString("DeleteThemeTitle", R.string.DeleteThemeTitle));
+                                    builder1.setMessage(getString("DeleteThemeAlert", R.string.DeleteThemeAlert));
+                                    builder1.setPositiveButton(getString("Delete", R.string.Delete), (dialogInterface, i) -> {
                                         if (Theme.deleteThemeAccent(accentsAdapter.currentTheme, accent, true)) {
                                             Theme.refreshThemeColors();
                                             NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.needSetDayNightTheme, Theme.getActiveTheme(), currentType == THEME_TYPE_NIGHT, null, -1);
                                         }
                                     });
-                                    builder1.setNegativeButton(LocaleController.getString("Cancel", R.string.Cancel), null);
+                                    builder1.setNegativeButton(getString("Cancel", R.string.Cancel), null);
                                     AlertDialog alertDialog = builder1.create();
                                     showDialog(alertDialog);
                                     TextView button = (TextView) alertDialog.getButton(DialogInterface.BUTTON_POSITIVE);
@@ -2205,47 +2453,49 @@ public class ThemeActivity extends BaseFragment implements NotificationCenter.No
                     TextSettingsCell cell = (TextSettingsCell) holder.itemView;
                     if (position == nightThemeRow) {
                         if (Theme.selectedAutoNightType == Theme.AUTO_NIGHT_TYPE_NONE || Theme.getCurrentNightTheme() == null) {
-                            cell.setTextAndValue(LocaleController.getString("AutoNightTheme", R.string.AutoNightTheme), LocaleController.getString("AutoNightThemeOff", R.string.AutoNightThemeOff), false);
+                            cell.setTextAndValue(getString(R.string.AutoNightTheme), getString(R.string.AutoNightThemeOff), false);
                         } else {
-                            cell.setTextAndValue(LocaleController.getString("AutoNightTheme", R.string.AutoNightTheme), Theme.getCurrentNightThemeName(), false);
+                            cell.setTextAndValue(getString(R.string.AutoNightTheme), Theme.getCurrentNightThemeName(), false);
                         }
                     } else if (position == scheduleFromRow) {
                         int currentHour = Theme.autoNightDayStartTime / 60;
                         int currentMinute = (Theme.autoNightDayStartTime - currentHour * 60);
-                        cell.setTextAndValue(LocaleController.getString("AutoNightFrom", R.string.AutoNightFrom), String.format("%02d:%02d", currentHour, currentMinute), true);
+                        cell.setTextAndValue(getString("AutoNightFrom", R.string.AutoNightFrom), String.format("%02d:%02d", currentHour, currentMinute), true);
                     } else if (position == scheduleToRow) {
                         int currentHour = Theme.autoNightDayEndTime / 60;
                         int currentMinute = (Theme.autoNightDayEndTime - currentHour * 60);
-                        cell.setTextAndValue(LocaleController.getString("AutoNightTo", R.string.AutoNightTo), String.format("%02d:%02d", currentHour, currentMinute), false);
+                        cell.setTextAndValue(getString("AutoNightTo", R.string.AutoNightTo), String.format("%02d:%02d", currentHour, currentMinute), false);
                     } else if (position == scheduleUpdateLocationRow) {
-                        cell.setTextAndValue(LocaleController.getString("AutoNightUpdateLocation", R.string.AutoNightUpdateLocation), Theme.autoNightCityName, false);
+                        cell.setTextAndValue(getString("AutoNightUpdateLocation", R.string.AutoNightUpdateLocation), Theme.autoNightCityName, false);
                     } else if (position == contactsSortRow) {
                         String value;
                         SharedPreferences preferences = MessagesController.getGlobalMainSettings();
                         int sort = preferences.getInt("sortContactsBy", 0);
                         if (sort == 0) {
-                            value = LocaleController.getString("Default", R.string.Default);
+                            value = getString("Default", R.string.Default);
                         } else if (sort == 1) {
-                            value = LocaleController.getString("FirstName", R.string.SortFirstName);
+                            value = getString("FirstName", R.string.SortFirstName);
                         } else {
-                            value = LocaleController.getString("LastName", R.string.SortLastName);
+                            value = getString("LastName", R.string.SortLastName);
                         }
-                        cell.setTextAndValue(LocaleController.getString("SortBy", R.string.SortBy), value, true);
+                        cell.setTextAndValue(getString("SortBy", R.string.SortBy), value, true);
                     } else if (position == contactsReimportRow) {
-                        cell.setText(LocaleController.getString("ImportContacts", R.string.ImportContacts), true);
+                        cell.setText(getString("ImportContacts", R.string.ImportContacts), true);
                     } else if (position == distanceRow) {
                         String value;
                         if (SharedConfig.distanceSystemType == 0) {
-                            value = LocaleController.getString("DistanceUnitsAutomatic", R.string.DistanceUnitsAutomatic);
+                            value = getString("DistanceUnitsAutomatic", R.string.DistanceUnitsAutomatic);
                         } else if (SharedConfig.distanceSystemType == 1) {
-                            value = LocaleController.getString("DistanceUnitsKilometers", R.string.DistanceUnitsKilometers);
+                            value = getString("DistanceUnitsKilometers", R.string.DistanceUnitsKilometers);
                         } else {
-                            value = LocaleController.getString("DistanceUnitsMiles", R.string.DistanceUnitsMiles);
+                            value = getString("DistanceUnitsMiles", R.string.DistanceUnitsMiles);
                         }
-                        cell.setTextAndValue(LocaleController.getString("DistanceUnits", R.string.DistanceUnits), value, updateDistance, false);
+                        cell.setTextAndValue(getString("DistanceUnits", R.string.DistanceUnits), value, updateDistance, true);
                         updateDistance = false;
+                    } else if (position == searchEngineRow) {
+                        cell.setTextAndValue(getString(R.string.SearchEngine), SearchEngine.getCurrent().name, updateSearchEngine, false);
                     } else if (position == bluetoothScoRow) {
-                        cell.setTextAndValue(LocaleController.getString(R.string.MicrophoneForVoiceMessages), LocaleController.getString(SharedConfig.recordViaSco ? R.string.MicrophoneForVoiceMessagesSco : R.string.MicrophoneForVoiceMessagesBuiltIn), updateRecordViaSco, false);
+                        cell.setTextAndValue(getString(R.string.MicrophoneForVoiceMessages), getString(SharedConfig.recordViaSco ? R.string.MicrophoneForVoiceMessagesSco : R.string.MicrophoneForVoiceMessagesBuiltIn), updateRecordViaSco, false);
                         updateRecordViaSco = false;
                     }
                     break;
@@ -2258,9 +2508,9 @@ public class ThemeActivity extends BaseFragment implements NotificationCenter.No
                     } else if (position == scheduleLocationInfoRow) {
                         cell.setText(getLocationSunString());
                     } else if (position == swipeGestureInfoRow) {
-                        cell.setText(LocaleController.getString("ChatListSwipeGestureInfo", R.string.ChatListSwipeGestureInfo));
+                        cell.setText(getString("ChatListSwipeGestureInfo", R.string.ChatListSwipeGestureInfo));
                     } else if (position == liteModeInfoRow) {
-                        cell.setText(LocaleController.getString("LiteModeInfo", R.string.LiteModeInfo));
+                        cell.setText(getString("LiteModeInfo", R.string.LiteModeInfo));
                     } else {
                         cell.setFixedSize(12);
                         cell.setText("");
@@ -2278,48 +2528,48 @@ public class ThemeActivity extends BaseFragment implements NotificationCenter.No
                 case TYPE_THEME_TYPE: {
                     ThemeTypeCell typeCell = (ThemeTypeCell) holder.itemView;
                     if (position == nightDisabledRow) {
-                        typeCell.setValue(LocaleController.getString("AutoNightDisabled", R.string.AutoNightDisabled), Theme.selectedAutoNightType == Theme.AUTO_NIGHT_TYPE_NONE, true);
+                        typeCell.setValue(getString("AutoNightDisabled", R.string.AutoNightDisabled), Theme.selectedAutoNightType == Theme.AUTO_NIGHT_TYPE_NONE, true);
                     } else if (position == nightScheduledRow) {
-                        typeCell.setValue(LocaleController.getString("AutoNightScheduled", R.string.AutoNightScheduled), Theme.selectedAutoNightType == Theme.AUTO_NIGHT_TYPE_SCHEDULED, true);
+                        typeCell.setValue(getString("AutoNightScheduled", R.string.AutoNightScheduled), Theme.selectedAutoNightType == Theme.AUTO_NIGHT_TYPE_SCHEDULED, true);
                     } else if (position == nightAutomaticRow) {
-                        typeCell.setValue(LocaleController.getString("AutoNightAdaptive", R.string.AutoNightAdaptive), Theme.selectedAutoNightType == Theme.AUTO_NIGHT_TYPE_AUTOMATIC, nightSystemDefaultRow != -1);
+                        typeCell.setValue(getString("AutoNightAdaptive", R.string.AutoNightAdaptive), Theme.selectedAutoNightType == Theme.AUTO_NIGHT_TYPE_AUTOMATIC, nightSystemDefaultRow != -1);
                     } else if (position == nightSystemDefaultRow) {
-                        typeCell.setValue(LocaleController.getString("AutoNightSystemDefault", R.string.AutoNightSystemDefault), Theme.selectedAutoNightType == Theme.AUTO_NIGHT_TYPE_SYSTEM, false);
+                        typeCell.setValue(getString("AutoNightSystemDefault", R.string.AutoNightSystemDefault), Theme.selectedAutoNightType == Theme.AUTO_NIGHT_TYPE_SYSTEM, false);
                     }
                     break;
                 }
                 case TYPE_HEADER: {
                     HeaderCell headerCell = (HeaderCell) holder.itemView;
                     if (position == scheduleHeaderRow) {
-                        headerCell.setText(LocaleController.getString("AutoNightSchedule", R.string.AutoNightSchedule));
+                        headerCell.setText(getString("AutoNightSchedule", R.string.AutoNightSchedule));
                     } else if (position == automaticHeaderRow) {
-                        headerCell.setText(LocaleController.getString("AutoNightBrightness", R.string.AutoNightBrightness));
+                        headerCell.setText(getString("AutoNightBrightness", R.string.AutoNightBrightness));
                     } else if (position == preferedHeaderRow) {
-                        headerCell.setText(LocaleController.getString("AutoNightPreferred", R.string.AutoNightPreferred));
+                        headerCell.setText(getString("AutoNightPreferred", R.string.AutoNightPreferred));
                     } else if (position == settingsRow) {
-                        headerCell.setText(LocaleController.getString("SETTINGS", R.string.SETTINGS));
+                        headerCell.setText(getString("SETTINGS", R.string.SETTINGS));
                     } else if (position == themeHeaderRow) {
                         if (currentType == THEME_TYPE_THEMES_BROWSER) {
-                            headerCell.setText(LocaleController.getString("BuildMyOwnTheme", R.string.BuildMyOwnTheme));
+                            headerCell.setText(getString("BuildMyOwnTheme", R.string.BuildMyOwnTheme));
                         } else {
-                            headerCell.setText(LocaleController.getString("ColorTheme", R.string.ColorTheme));
+                            headerCell.setText(getString("ColorTheme", R.string.ColorTheme));
                         }
                     } else if (position == textSizeHeaderRow) {
-                        headerCell.setText(LocaleController.getString("TextSizeHeader", R.string.TextSizeHeader));
+                        headerCell.setText(getString("TextSizeHeader", R.string.TextSizeHeader));
                     } else if (position == chatListHeaderRow) {
-                        headerCell.setText(LocaleController.getString("ChatList", R.string.ChatList));
+                        headerCell.setText(getString("ChatList", R.string.ChatList));
                     } else if (position == bubbleRadiusHeaderRow) {
-                        headerCell.setText(LocaleController.getString("BubbleRadius", R.string.BubbleRadius));
+                        headerCell.setText(getString("BubbleRadius", R.string.BubbleRadius));
                     } else if (position == swipeGestureHeaderRow) {
-                        headerCell.setText(LocaleController.getString("ChatListSwipeGesture", R.string.ChatListSwipeGesture));
+                        headerCell.setText(getString("ChatListSwipeGesture", R.string.ChatListSwipeGesture));
                     } else if (position == selectThemeHeaderRow) {
-                        headerCell.setText(LocaleController.getString("SelectTheme", R.string.SelectTheme));
+                        headerCell.setText(getString("SelectTheme", R.string.SelectTheme));
                     } else if (position == appIconHeaderRow) {
-                        headerCell.setText(LocaleController.getString(R.string.AppIcon));
+                        headerCell.setText(getString(R.string.AppIcon));
                     } else if (position == otherHeaderRow) {
-                        headerCell.setText(LocaleController.getString("OtherSettings", R.string.OtherSettings));
+                        headerCell.setText(getString("OtherSettings", R.string.OtherSettings));
                     } else if (position == mediaSoundHeaderRow) {
-                        headerCell.setText(LocaleController.getString("MediaAndSoundSettings", R.string.MediaAndSoundSettings));
+                        headerCell.setText(getString("MediaAndSoundSettings", R.string.MediaAndSoundSettings));
                     }
                     break;
                 }
@@ -2331,29 +2581,29 @@ public class ThemeActivity extends BaseFragment implements NotificationCenter.No
                 case TYPE_TEXT_CHECK: {
                     TextCheckCell textCheckCell = (TextCheckCell) holder.itemView;
                     if (position == scheduleLocationRow) {
-                        textCheckCell.setTextAndCheck(LocaleController.getString("AutoNightLocation", R.string.AutoNightLocation), Theme.autoNightScheduleByLocation, true);
+                        textCheckCell.setTextAndCheck(getString("AutoNightLocation", R.string.AutoNightLocation), Theme.autoNightScheduleByLocation, true);
                     } else if (position == enableAnimationsRow) {
                         SharedPreferences preferences = MessagesController.getGlobalMainSettings();
-                        textCheckCell.setTextAndCheck(LocaleController.getString("EnableAnimations", R.string.EnableAnimations), preferences.getBoolean("view_animations", true), true);
+                        textCheckCell.setTextAndCheck(getString("EnableAnimations", R.string.EnableAnimations), preferences.getBoolean("view_animations", true), true);
                     } else if (position == sendByEnterRow) {
                         SharedPreferences preferences = MessagesController.getGlobalMainSettings();
-                        textCheckCell.setTextAndCheck(LocaleController.getString("SendByEnter", R.string.SendByEnter), preferences.getBoolean("send_by_enter", false), true);
+                        textCheckCell.setTextAndCheck(getString("SendByEnter", R.string.SendByEnter), preferences.getBoolean("send_by_enter", false), true);
                     } else if (position == raiseToSpeakRow) {
-                        textCheckCell.setTextAndValueAndCheck(LocaleController.getString("RaiseToSpeak", R.string.RaiseToSpeak), LocaleController.getString("RaiseToSpeakInfo", R.string.RaiseToSpeakInfo), SharedConfig.raiseToSpeak, true, true);
+                        textCheckCell.setTextAndValueAndCheck(getString("RaiseToSpeak", R.string.RaiseToSpeak), getString("RaiseToSpeakInfo", R.string.RaiseToSpeakInfo), SharedConfig.raiseToSpeak, true, true);
                     } else if (position == raiseToListenRow) {
-                        textCheckCell.setTextAndValueAndCheck(LocaleController.getString("RaiseToListen", R.string.RaiseToListen), LocaleController.getString("RaiseToListenInfo", R.string.RaiseToListenInfo), SharedConfig.raiseToListen, true, true);
+                        textCheckCell.setTextAndValueAndCheck(getString("RaiseToListen", R.string.RaiseToListen), getString("RaiseToListenInfo", R.string.RaiseToListenInfo), SharedConfig.raiseToListen, true, true);
                     } else if (position == nextMediaTapRow) {
-                        textCheckCell.setTextAndValueAndCheck(LocaleController.getString("NextMediaTap", R.string.NextMediaTap), LocaleController.getString("NextMediaTapInfo", R.string.NextMediaTapInfo), SharedConfig.nextMediaTap, true, true);
+                        textCheckCell.setTextAndValueAndCheck(getString("NextMediaTap", R.string.NextMediaTap), getString("NextMediaTapInfo", R.string.NextMediaTapInfo), SharedConfig.nextMediaTap, true, true);
                     } else if (position == pauseOnRecordRow) {
-                        textCheckCell.setTextAndValueAndCheck(LocaleController.getString(R.string.PauseMusicOnRecord), LocaleController.getString("PauseMusicOnRecordInfo", R.string.PauseMusicOnRecordInfo), SharedConfig.pauseMusicOnRecord, true, true);
+                        textCheckCell.setTextAndValueAndCheck(getString(R.string.PauseMusicOnRecord), getString("PauseMusicOnRecordInfo", R.string.PauseMusicOnRecordInfo), SharedConfig.pauseMusicOnRecord, true, true);
                     } else if (position == pauseOnMediaRow) {
-                        textCheckCell.setTextAndCheck(LocaleController.getString(R.string.PauseMusicOnMedia), SharedConfig.pauseMusicOnMedia, true);
-                    } else if (position == customTabsRow) {
-                        textCheckCell.setTextAndValueAndCheck(LocaleController.getString("ChromeCustomTabs", R.string.ChromeCustomTabs), LocaleController.getString("ChromeCustomTabsInfo", R.string.ChromeCustomTabsInfo), SharedConfig.customTabs, false, true);
+                        textCheckCell.setTextAndCheck(getString(R.string.PauseMusicOnMedia), SharedConfig.pauseMusicOnMedia, true);
                     } else if (position == directShareRow) {
-                        textCheckCell.setTextAndValueAndCheck(LocaleController.getString("DirectShare", R.string.DirectShare), LocaleController.getString("DirectShareInfo", R.string.DirectShareInfo), SharedConfig.directShare, false, true);
+                        textCheckCell.setTextAndValueAndCheck(getString("DirectShare", R.string.DirectShare), getString("DirectShareInfo", R.string.DirectShareInfo), SharedConfig.directShare, false, true);
+                    } else if (position == sensitiveContentRow) {
+                        textCheckCell.setTextAndValueAndCheck(getString(R.string.ShowSensitiveContent), getString(R.string.ShowSensitiveContentInfo), getMessagesController().showSensitiveContent(), true, true);
                     } else if (position == chatBlurRow) {
-                        textCheckCell.setTextAndCheck(LocaleController.getString("BlurInChat", R.string.BlurInChat), SharedConfig.chatBlurEnabled(), true);
+                        textCheckCell.setTextAndCheck(getString("BlurInChat", R.string.BlurInChat), SharedConfig.chatBlurEnabled(), true);
                     }
                     break;
                 }
@@ -2361,19 +2611,21 @@ public class ThemeActivity extends BaseFragment implements NotificationCenter.No
                     NotificationsCheckCell checkCell = (NotificationsCheckCell) holder.itemView;
                     if (position == nightThemeRow) {
                         boolean enabled = Theme.selectedAutoNightType != Theme.AUTO_NIGHT_TYPE_NONE;
-                        String value = enabled ? Theme.getCurrentNightThemeName() : LocaleController.getString("AutoNightThemeOff", R.string.AutoNightThemeOff);
+                        String value = enabled ? Theme.getCurrentNightThemeName() : getString("AutoNightThemeOff", R.string.AutoNightThemeOff);
                         if (enabled) {
                             String type;
                             if (Theme.selectedAutoNightType == Theme.AUTO_NIGHT_TYPE_SCHEDULED) {
-                                type = LocaleController.getString("AutoNightScheduled", R.string.AutoNightScheduled);
+                                type = getString("AutoNightScheduled", R.string.AutoNightScheduled);
                             } else if (Theme.selectedAutoNightType == Theme.AUTO_NIGHT_TYPE_SYSTEM) {
-                                type = LocaleController.getString("AutoNightSystemDefault", R.string.AutoNightSystemDefault);
+                                type = getString("AutoNightSystemDefault", R.string.AutoNightSystemDefault);
                             } else {
-                                type = LocaleController.getString("AutoNightAdaptive", R.string.AutoNightAdaptive);
+                                type = getString("AutoNightAdaptive", R.string.AutoNightAdaptive);
                             }
                             value = type + " " + value;
                         }
-                        checkCell.setTextAndValueAndIconAndCheck(LocaleController.getString("AutoNightTheme", R.string.AutoNightTheme), value, R.drawable.msg2_night_auto, enabled, 0, false, true);
+                        checkCell.setTextAndValueAndIconAndCheck(getString("AutoNightTheme", R.string.AutoNightTheme), value, R.drawable.msg2_night_auto, enabled, 0, false, true);
+                    } else if (position == browserRow) {
+                        checkCell.setTextAndValueAndIconAndCheck(getString(R.string.InappBrowser), getString(R.string.InappBrowserInfo), R.drawable.msg2_language, SharedConfig.inappBrowser, 0, false, true);
                     }
                     break;
                 }
@@ -2403,26 +2655,26 @@ public class ThemeActivity extends BaseFragment implements NotificationCenter.No
                     if (position == backgroundRow) {
                         cell.setSubtitle(null);
                         cell.setColors(Theme.key_windowBackgroundWhiteBlueText4, Theme.key_windowBackgroundWhiteBlueText4);
-                        cell.setTextAndIcon(LocaleController.getString(R.string.ChangeChatBackground), R.drawable.msg_background, changeUserColor >= 0);
+                        cell.setTextAndIcon(getString(R.string.ChangeChatBackground), R.drawable.msg_background, changeUserColor >= 0);
                     } else if (position == editThemeRow) {
                         cell.setSubtitle(null);
                         cell.setColors(Theme.key_windowBackgroundWhiteBlueText4, Theme.key_windowBackgroundWhiteBlueText4);
-                        cell.setTextAndIcon(LocaleController.getString("EditCurrentTheme", R.string.EditCurrentTheme), R.drawable.msg_theme, true);
+                        cell.setTextAndIcon(getString(R.string.EditCurrentTheme), R.drawable.msg_theme, true);
                     } else if (position == createNewThemeRow) {
                         cell.setSubtitle(null);
                         cell.setColors(Theme.key_windowBackgroundWhiteBlueText4, Theme.key_windowBackgroundWhiteBlueText4);
-                        cell.setTextAndIcon(LocaleController.getString("CreateNewTheme", R.string.CreateNewTheme), R.drawable.msg_colors, false);
+                        cell.setTextAndIcon(getString(R.string.CreateNewTheme), R.drawable.msg_colors, false);
                     } else if (position == liteModeRow) {
                         cell.setColors(Theme.key_dialogIcon, Theme.key_windowBackgroundWhiteBlackText);
-                        cell.setTextAndIcon(LocaleController.getString("LiteMode", R.string.LiteMode), R.drawable.msg2_animations, true);
-                        cell.setSubtitle(LocaleController.getString("LiteModeInfo", R.string.LiteModeInfo));
+                        cell.setTextAndIcon(getString(R.string.LiteMode), R.drawable.msg2_animations, true);
+                        cell.setSubtitle(getString(R.string.LiteModeInfo));
                         cell.heightDp = 60;
                         cell.offsetFromImage = 64;
                         cell.imageLeft = 20;
                     } else if (position == stickersRow) {
                         cell.setColors(Theme.key_dialogIcon, Theme.key_windowBackgroundWhiteBlackText);
-                        cell.setTextAndIcon(LocaleController.getString("StickersName", R.string.StickersName), R.drawable.msg2_sticker, false);
-                        cell.setSubtitle(LocaleController.getString("StickersNameInfo2", R.string.StickersNameInfo2));
+                        cell.setTextAndIcon(getString(R.string.StickersName), R.drawable.msg2_sticker, false);
+                        cell.setSubtitle(getString(R.string.StickersNameInfo2));
                         cell.offsetFromImage = 64;
                         cell.heightDp = 60;
                         cell.imageLeft = 20;
@@ -2467,7 +2719,7 @@ public class ThemeActivity extends BaseFragment implements NotificationCenter.No
             if (position == scheduleFromRow || position == distanceRow ||
                     position == scheduleToRow || position == scheduleUpdateLocationRow ||
                     position == contactsReimportRow || position == contactsSortRow ||
-                    position == bluetoothScoRow) {
+                    position == bluetoothScoRow || position == searchEngineRow) {
                 return TYPE_TEXT_SETTING;
             } else if (position == automaticBrightnessInfoRow || position == scheduleLocationInfoRow || position == swipeGestureInfoRow || position == stickersInfoRow || position == liteModeInfoRow) {
                 return TYPE_TEXT_INFO_PRIVACY;
@@ -2487,14 +2739,14 @@ public class ThemeActivity extends BaseFragment implements NotificationCenter.No
             } else if (position == automaticBrightnessRow) {
                 return TYPE_BRIGHTNESS;
             } else if (position == scheduleLocationRow || position == sendByEnterRow ||
-                    position == raiseToSpeakRow || position == raiseToListenRow || position == pauseOnRecordRow || position == customTabsRow ||
-                    position == directShareRow || position == chatBlurRow || position == pauseOnMediaRow || position == nextMediaTapRow) {
+                    position == raiseToSpeakRow || position == raiseToListenRow || position == pauseOnRecordRow ||
+                    position == directShareRow || position == chatBlurRow || position == pauseOnMediaRow || position == nextMediaTapRow || position == sensitiveContentRow) {
                 return TYPE_TEXT_CHECK;
             } else if (position == textSizeRow) {
                 return TYPE_TEXT_SIZE;
             } else if (position == chatListRow) {
                 return TYPE_CHAT_LIST;
-            } else if (position == nightThemeRow) {
+            } else if (position == nightThemeRow || position == browserRow) {
                 return TYPE_NIGHT_THEME;
             } else if (position == themeListRow) {
                 return TYPE_THEME_LIST;

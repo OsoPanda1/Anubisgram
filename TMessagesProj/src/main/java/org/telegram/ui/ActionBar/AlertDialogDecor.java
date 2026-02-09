@@ -1,5 +1,7 @@
 package org.telegram.ui.ActionBar;
 
+import static org.telegram.messenger.AndroidUtilities.dp;
+
 import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
 import android.app.Activity;
@@ -93,7 +95,6 @@ public class AlertDialogDecor extends AlertDialog {
 
         contentView = inflateContent(false);
         contentView.setClickable(true);
-        contentView.setFitsSystemWindows(false);
 
         WindowManager.LayoutParams params = getWindow().getAttributes();
         FrameLayout container = new FrameLayout(getContext());
@@ -118,7 +119,7 @@ public class AlertDialogDecor extends AlertDialog {
             } else {
                 rect.set(insets.getStableInsetLeft(), insets.getStableInsetTop(), insets.getStableInsetRight(), insets.getStableInsetBottom());
             }
-            contentWrapper.setPadding(rect.left, rect.top, rect.right, rect.bottom);
+            contentWrapper.setPadding(rect.left, rect.top, rect.right, rect.bottom + AndroidUtilities.navigationBarHeight);
             contentWrapper.requestLayout();
             return insets;
         });

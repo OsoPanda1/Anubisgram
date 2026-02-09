@@ -10,7 +10,6 @@ import android.graphics.drawable.Drawable;
 import android.text.Layout;
 import android.text.StaticLayout;
 import android.text.TextPaint;
-import android.view.MotionEvent;
 import android.view.View;
 
 import androidx.core.graphics.ColorUtils;
@@ -51,10 +50,10 @@ public class UnreadCounterTextView extends View {
     public UnreadCounterTextView(Context context) {
         super(context);
         textPaint.setTextSize(AndroidUtilities.dp(13));
-        textPaint.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"));
+        textPaint.setTypeface(AndroidUtilities.bold());
 
         layoutPaint.setTextSize(AndroidUtilities.dp(15));
-        layoutPaint.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"));
+        layoutPaint.setTypeface(AndroidUtilities.bold());
     }
 
     public void setText(CharSequence text, boolean animatedFromBottom) {
@@ -65,7 +64,7 @@ public class UnreadCounterTextView extends View {
         this.animatedFromBottom = animatedFromBottom;
         textLayoutOut = textLayout;
         iconOut = icon;
-        layoutPaint.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"));
+        layoutPaint.setTypeface(AndroidUtilities.bold());
         layoutTextWidth = (int) Math.ceil(layoutPaint.measureText(text, 0, text.length()));
         icon = null;
         textLayout = new StaticLayout(text, layoutPaint, layoutTextWidth, Layout.Alignment.ALIGN_NORMAL, 1.0f, 0.0f, true);
@@ -88,7 +87,7 @@ public class UnreadCounterTextView extends View {
     }
 
     public void setText(CharSequence text) {
-        layoutPaint.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"));
+        layoutPaint.setTypeface(AndroidUtilities.bold());
         layoutTextWidth = (int) Math.ceil(layoutPaint.measureText(text, 0, text.length()));
         icon = null;
         textLayout = new StaticLayout(text, layoutPaint, layoutTextWidth, Layout.Alignment.ALIGN_NORMAL, 1.0f, 0.0f, true);
@@ -138,42 +137,8 @@ public class UnreadCounterTextView extends View {
         }
     }
 
-    @Override
-    public boolean onTouchEvent(MotionEvent event) {
-        if (event.getAction() == MotionEvent.ACTION_DOWN) {
-            if (textLayout != null) {
-                int lineWidth = (int) Math.ceil(textLayout.getLineWidth(0));
-                int contentWidth;
-                if (getMeasuredWidth() == ((View)getParent()).getMeasuredWidth()) {
-                    contentWidth = getMeasuredWidth() - AndroidUtilities.dp(96);
-                } else {
-                    if (isTouchFullWidth())  {
-                        contentWidth = getMeasuredWidth();
-                    } else {
-                        contentWidth = lineWidth + (circleWidth > 0 ? circleWidth + AndroidUtilities.dp(8) : 0);
-                        contentWidth += AndroidUtilities.dp(48);
-                    }
-                }
-                int x = (getMeasuredWidth() - contentWidth) / 2;
-                rect.set(
-                        x, getMeasuredHeight() / 2f - contentWidth / 2f,
-                        x + contentWidth, getMeasuredHeight() / 2f + contentWidth / 2f
-                );
-                if (!rect.contains(event.getX(), event.getY())) {
-                    setPressed(false);
-                    return false;
-                }
-            }
-        }
-        return super.onTouchEvent(event);
-    }
-
     protected Theme.ResourcesProvider getResourceProvider() {
         return null;
-    }
-
-    protected boolean isTouchFullWidth() {
-        return false;
     }
 
     protected void updateCounter() {

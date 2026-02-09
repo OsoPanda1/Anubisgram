@@ -50,12 +50,18 @@ import java.util.Set;
 
 public class StickerCategoriesListView extends RecyclerListView {
 
-    @IntDef({CategoriesType.DEFAULT, CategoriesType.STATUS, CategoriesType.PROFILE_PHOTOS})
+    @IntDef({
+        CategoriesType.DEFAULT,
+        CategoriesType.STATUS,
+        CategoriesType.PROFILE_PHOTOS,
+        CategoriesType.STICKERS
+    })
     @Retention(RetentionPolicy.SOURCE)
     public static @interface CategoriesType {
         int DEFAULT = 0;
         int STATUS = 1;
         int PROFILE_PHOTOS = 2;
+        int STICKERS = 3;
     }
 
     private float shownButtonsAtStart = 6.5f;
@@ -98,7 +104,7 @@ public class StickerCategoriesListView extends RecyclerListView {
             if (emojiGroups == null || emojiGroups.groups == null) {
                 return;
             }
-            for (TLRPC.TL_emojiGroup group : emojiGroups.groups) {
+            for (TLRPC.EmojiGroup group : emojiGroups.groups) {
                 AnimatedEmojiDrawable.getDocumentFetcher(account).fetchDocument(group.icon_emoji_id, null);
             }
         });
@@ -150,6 +156,7 @@ public class StickerCategoriesListView extends RecyclerListView {
                     for (int j = 0; j < emojiGroups.groups.size(); ++j) {
                         categories[i + j] = EmojiCategory.remote(emojiGroups.groups.get(j));
                     }
+                    categories = preprocessCategories(categories);
                     adapter.notifyDataSetChanged();
                     setCategoriesShownT(0);
                     updateCategoriesShown(categoriesShouldShow, System.currentTimeMillis() - start > 16);
@@ -157,6 +164,10 @@ public class StickerCategoriesListView extends RecyclerListView {
                 NotificationCenter.getInstance(UserConfig.selectedAccount).doOnIdle(action);
             }
         });
+    }
+
+    protected EmojiCategory[] preprocessCategories(StickerCategoriesListView.EmojiCategory[] categories) {
+        return categories;
     }
 
     public void setShownButtonsAtStart(float buttonsCount) {
@@ -606,6 +617,14 @@ public class StickerCategoriesListView extends RecyclerListView {
 
     static int loadedCategoryIcons = 0;
 
+    public boolean isGlassDesign;
+
+    private int getGlassIconColor(float alpha) {
+        return ColorUtils.setAlphaComponent(
+                Theme.getColor(Theme.key_glass_defaultIcon, resourcesProvider),
+                (int) (255 * alpha));
+    }
+
     private class CategoryButton extends RLottieImageView {
 
         private int imageColor;
@@ -616,7 +635,7 @@ public class StickerCategoriesListView extends RecyclerListView {
         public CategoryButton(Context context) {
             super(context);
 
-            setImageColor(getThemedColor(Theme.key_chat_emojiPanelIcon));
+            setImageColor(isGlassDesign ? getGlassIconColor(0.4f) : getThemedColor(Theme.key_chat_emojiPanelIcon));
             setScaleType(ScaleType.CENTER);
 
             setLayerNum(layerNum);
@@ -719,13 +738,17 @@ public class StickerCategoriesListView extends RecyclerListView {
 
         private void updateSelectedT(float t) {
             selectedT = t;
-            setImageColor(
-                ColorUtils.blendARGB(
-                    getThemedColor(Theme.key_chat_emojiPanelIcon),
-                    getThemedColor(Theme.key_chat_emojiPanelIconSelected),
-                    selectedT
-                )
-            );
+            if (isGlassDesign) {
+                setImageColor(getGlassIconColor(AndroidUtilities.lerp(0.4f, 0.8f, selectedT)));
+            } else {
+                setImageColor(
+                        ColorUtils.blendARGB(
+                                getThemedColor(Theme.key_chat_emojiPanelIcon),
+                                getThemedColor(Theme.key_chat_emojiPanelIconSelected),
+                                selectedT
+                        )
+                );
+            }
             invalidate();
         }
 
@@ -832,6 +855,8 @@ public class StickerCategoriesListView extends RecyclerListView {
         public boolean animated;
         public int iconResId;
         public String emojis;
+        public boolean premium;
+        public boolean greeting;
 
         public boolean remote;
         public long documentId;
@@ -854,11 +879,17 @@ public class StickerCategoriesListView extends RecyclerListView {
             return category;
         }
 
-        public static EmojiCategory remote(TLRPC.TL_emojiGroup group) {
+        public static EmojiCategory remote(TLRPC.EmojiGroup group) {
             EmojiCategory category = new EmojiCategory();
             category.remote = true;
             category.documentId = group.icon_emoji_id;
-            category.emojis = TextUtils.concat(group.emoticons.toArray(new String[0])).toString();
+            if (group instanceof TLRPC.TL_emojiGroupPremium) {
+                category.emojis = "premium";
+                category.premium = true;
+            } else {
+                category.emojis = TextUtils.concat(group.emoticons.toArray(new String[0])).toString();
+            }
+            category.greeting = group instanceof TLRPC.TL_emojiGroupGreeting;
             category.title = group.title;
             return category;
         }
@@ -875,6 +906,9 @@ public class StickerCategoriesListView extends RecyclerListView {
             } else if (type == CategoriesType.PROFILE_PHOTOS) {
                 req = new TLRPC.TL_messages_getEmojiProfilePhotoGroups();
                 ((TLRPC.TL_messages_getEmojiProfilePhotoGroups) req).hash = (int) hash;
+            } else if (type == CategoriesType.STICKERS) {
+                req = new TLRPC.TL_messages_getEmojiStickerGroups();
+                ((TLRPC.TL_messages_getEmojiStickerGroups) req).hash = (int) hash;
             } else {
                 req = new TLRPC.TL_messages_getEmojiGroups();
                 ((TLRPC.TL_messages_getEmojiGroups) req).hash = (int) hash;

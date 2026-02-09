@@ -11,6 +11,7 @@ package org.telegram.ui.Components;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.ColorFilter;
+import android.graphics.Rect;
 import android.graphics.drawable.Drawable;
 
 import androidx.annotation.NonNull;
@@ -25,10 +26,13 @@ public class CombinedDrawable extends Drawable implements Drawable.Callback {
     private int iconHeight;
     private int backWidth;
     private int backHeight;
+    private boolean center;
     private int offsetX;
     private int offsetY;
     private boolean fullSize;
     private boolean both;
+
+    public float translateX, translateY;
 
     public CombinedDrawable(Drawable backgroundDrawable, Drawable iconDrawable, int leftOffset, int topOffset) {
         background = backgroundDrawable;
@@ -75,6 +79,10 @@ public class CombinedDrawable extends Drawable implements Drawable.Callback {
     public void setCustomSize(int width, int height) {
         backWidth = width;
         backHeight = height;
+    }
+
+    public void setCenter(boolean value) {
+        center = value;
     }
 
     public void setIconOffset(int x, int y) {
@@ -135,6 +143,17 @@ public class CombinedDrawable extends Drawable implements Drawable.Callback {
 
     @Override
     public void draw(Canvas canvas) {
+        canvas.save();
+        canvas.translate(translateX, translateY);
+        if (center) {
+            Rect bounds = getBounds();
+            setBounds(
+                bounds.centerX() - getIntrinsicWidth() / 2,
+                bounds.centerY() - getIntrinsicHeight() / 2,
+                bounds.centerX() + getIntrinsicWidth() / 2,
+                bounds.centerY() + getIntrinsicHeight() / 2
+            );
+        }
         if (background != null) {
             background.setBounds(getBounds());
             background.draw(canvas);
@@ -162,6 +181,7 @@ public class CombinedDrawable extends Drawable implements Drawable.Callback {
             }
             icon.draw(canvas);
         }
+        canvas.restore();
     }
 
     @Override

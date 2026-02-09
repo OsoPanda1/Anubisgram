@@ -37,9 +37,9 @@ import org.telegram.messenger.ChatObject;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.MessageObject;
 import org.telegram.messenger.MessagesController;
-import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
 import org.telegram.messenger.UserObject;
+import org.telegram.messenger.pip.utils.PipUtils;
 import org.telegram.messenger.support.LongSparseIntArray;
 import org.telegram.messenger.voip.VoIPService;
 import org.telegram.tgnet.TLRPC;
@@ -265,14 +265,14 @@ public class GroupCallRenderersContainer extends FrameLayout {
         pinTextView = new TextView(context);
         pinTextView.setTextColor(Color.WHITE);
         pinTextView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15);
-        pinTextView.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"));
-        pinTextView.setText(LocaleController.getString("CallVideoPin", R.string.CallVideoPin));
+        pinTextView.setTypeface(AndroidUtilities.bold());
+        pinTextView.setText(LocaleController.getString(R.string.CallVideoPin));
 
         unpinTextView = new TextView(context);
         unpinTextView.setTextColor(Color.WHITE);
         unpinTextView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15);
-        unpinTextView.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"));
-        unpinTextView.setText(LocaleController.getString("CallVideoUnpin", R.string.CallVideoUnpin));
+        unpinTextView.setTypeface(AndroidUtilities.bold());
+        unpinTextView.setText(LocaleController.getString(R.string.CallVideoUnpin));
 
 
         addView(pinTextView, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT | Gravity.TOP));
@@ -288,11 +288,11 @@ public class GroupCallRenderersContainer extends FrameLayout {
         pipView.setBackground(Theme.createSelectorDrawable(ColorUtils.setAlphaComponent(Color.WHITE, 55)));
         pipView.setOnClickListener(v -> {
             if (isRtmpStream()) {
-                if (AndroidUtilities.checkInlinePermissions(groupCallActivity.getParentActivity())) {
-                    RTMPStreamPipOverlay.show();
+                if (PipUtils.checkAnyPipPermissions(groupCallActivity.getParentActivity())) {
+                    RTMPStreamPipOverlay.show(groupCallActivity.getParentActivity());
                     groupCallActivity.dismiss();
-                } else {
-                    AlertsCreator.createDrawOverlayPermissionDialog(groupCallActivity.getParentActivity(), null).show();
+                } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                    AlertsCreator.createDrawOverlayPermissionDialog(groupCallActivity.getParentActivity(), null, true).show();
                 }
                 return;
             }
@@ -1119,7 +1119,7 @@ public class GroupCallRenderersContainer extends FrameLayout {
                         }
                     }
                     if (!found) {
-                        TLRPC.TL_groupCallParticipant participant = call.participants.get(speakingToastPeerId);
+                        TLRPC.GroupCallParticipant participant = call.participants.get(speakingToastPeerId);
                         groupCallActivity.fullscreenFor(new ChatObject.VideoParticipant(participant, false, false));
                         confirmAction = true;
                     }
@@ -1323,7 +1323,7 @@ public class GroupCallRenderersContainer extends FrameLayout {
         }
     }
 
-    public void setAmplitude(TLRPC.TL_groupCallParticipant participant, float v) {
+    public void setAmplitude(TLRPC.GroupCallParticipant participant, float v) {
         for (int i = 0; i < attachedRenderers.size(); i++) {
             if (MessageObject.getPeerId(attachedRenderers.get(i).participant.participant.peer) == MessageObject.getPeerId(participant.peer)) {
                 attachedRenderers.get(i).setAmplitude(v);
@@ -1394,7 +1394,7 @@ public class GroupCallRenderersContainer extends FrameLayout {
         SpannableStringBuilder spannableStringBuilder = null;
         for (int i = 0; i < call.currentSpeakingPeers.size(); i++) {
             long key = call.currentSpeakingPeers.keyAt(i);
-            TLRPC.TL_groupCallParticipant participant = call.currentSpeakingPeers.get(key);
+            TLRPC.GroupCallParticipant participant = call.currentSpeakingPeers.get(key);
             if (participant.self || participant.muted_by_you || MessageObject.getPeerId(fullscreenParticipant.participant.peer) == MessageObject.getPeerId(participant.peer)) {
                 continue;
             }
@@ -1420,13 +1420,13 @@ public class GroupCallRenderersContainer extends FrameLayout {
                     }
                     if (user != null) {
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                            spannableStringBuilder.append(UserObject.getFirstName(user), new TypefaceSpan(AndroidUtilities.getTypeface("fonts/rmedium.ttf")), 0);
+                            spannableStringBuilder.append(UserObject.getFirstName(user), new TypefaceSpan(AndroidUtilities.bold()), 0);
                         } else {
                             spannableStringBuilder.append(UserObject.getFirstName(user));
                         }
                     } else {
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                            spannableStringBuilder.append(chat.title, new TypefaceSpan(AndroidUtilities.getTypeface("fonts/rmedium.ttf")), 0);
+                            spannableStringBuilder.append(chat.title, new TypefaceSpan(AndroidUtilities.bold()), 0);
                         } else {
                             spannableStringBuilder.append(chat.title);
                         }
@@ -1505,7 +1505,7 @@ public class GroupCallRenderersContainer extends FrameLayout {
         return undoView[0];
     }
 
-    public boolean isVisible(TLRPC.TL_groupCallParticipant participant) {
+    public boolean isVisible(TLRPC.GroupCallParticipant participant) {
         long peerId = MessageObject.getPeerId(participant.peer);
         return attachedPeerIds.get(peerId) > 0;
     }

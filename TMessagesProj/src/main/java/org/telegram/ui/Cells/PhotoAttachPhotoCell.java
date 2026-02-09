@@ -8,6 +8,9 @@
 
 package org.telegram.ui.Cells;
 
+import static org.telegram.messenger.AndroidUtilities.dp;
+import static org.telegram.messenger.LocaleController.getString;
+
 import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
 import android.animation.AnimatorSet;
@@ -26,6 +29,9 @@ import android.graphics.drawable.Drawable;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.SystemClock;
+import android.text.SpannableString;
+import android.text.SpannableStringBuilder;
+import android.text.Spanned;
 import android.text.TextUtils;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -53,12 +59,15 @@ import org.telegram.messenger.R;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Components.BackupImageView;
+import org.telegram.ui.Components.ChatAttachAlertPhotoLayout;
 import org.telegram.ui.Components.CheckBox2;
+import org.telegram.ui.Components.ColoredImageSpan;
 import org.telegram.ui.Components.CubicBezierInterpolator;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.spoilers.SpoilerEffect;
 import org.telegram.ui.Components.spoilers.SpoilerEffect2;
 import org.telegram.ui.PhotoViewer;
+import org.telegram.ui.Stars.StarsIntroActivity;
 
 public class PhotoAttachPhotoCell extends FrameLayout {
 
@@ -66,6 +75,7 @@ public class PhotoAttachPhotoCell extends FrameLayout {
     private FrameLayout container;
     private FrameLayout checkFrame;
     private CheckBox2 checkBox;
+    private ImageView videoPlayImageView;
     private TextView videoTextView;
     private FrameLayout videoInfoContainer;
     private AnimatorSet animatorSet;
@@ -86,9 +96,13 @@ public class PhotoAttachPhotoCell extends FrameLayout {
     private AnimatorSet animator;
     private final Theme.ResourcesProvider resourcesProvider;
 
-    private SpoilerEffect spoilerEffect = new SpoilerEffect();
+    private SpoilerEffect spoilerEffect;
     private SpoilerEffect2 spoilerEffect2;
     private boolean hasSpoiler;
+    private boolean highQuality;
+
+    private long stars;
+    private boolean starsSelectedMultiple;
 
     private Path path = new Path();
     private float spoilerRevealX;
@@ -122,9 +136,12 @@ public class PhotoAttachPhotoCell extends FrameLayout {
                             path.addCircle(spoilerRevealX, spoilerRevealY, spoilerMaxRadius * spoilerRevealProgress, Path.Direction.CW);
                             canvas.clipPath(path, Region.Op.DIFFERENCE);
                         }
-                        float alphaProgress = CubicBezierInterpolator.DEFAULT.getInterpolation(1f - imageViewCrossfadeProgress);
-                        float alpha = hasSpoiler ? alphaProgress : 1f - alphaProgress;
+//                        float alphaProgress = CubicBezierInterpolator.DEFAULT.getInterpolation(1f - imageViewCrossfadeProgress);
+//                        float alpha = hasSpoiler ? alphaProgress : 1f - alphaProgress;
                         spoilerEffect2.draw(canvas, container, imageView.getMeasuredWidth(), imageView.getMeasuredHeight());
+                        if (photoEntry != null && photoEntry.starsAmount > 0) {
+                            imageView.drawBlurredText(canvas, 1f);
+                        }
                         if (spoilerRevealProgress != 0f) {
                             canvas.restore();
                         }
@@ -135,9 +152,6 @@ public class PhotoAttachPhotoCell extends FrameLayout {
             }
         };
         addView(container, LayoutHelper.createFrame(80, 80));
-
-        int sColor = Color.WHITE;
-        spoilerEffect.setColor(ColorUtils.setAlphaComponent(sColor, (int) (Color.alpha(sColor) * 0.325f)));
         imageView = new BackupImageView(context) {
             private Paint crossfadePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
             private long lastUpdate;
@@ -167,6 +181,10 @@ public class PhotoAttachPhotoCell extends FrameLayout {
 
                     blurImageReceiver.draw(canvas);
                     if (spoilerEffect2 == null) {
+                        if (spoilerEffect == null) {
+                            spoilerEffect = new SpoilerEffect();
+                            spoilerEffect.setColor(ColorUtils.setAlphaComponent(Color.WHITE, (int) (Color.alpha(Color.WHITE) * 0.325f)));
+                        }
                         spoilerEffect.setBounds(0, 0, getWidth(), getHeight());
                         spoilerEffect.draw(canvas);
                     }
@@ -212,20 +230,20 @@ public class PhotoAttachPhotoCell extends FrameLayout {
             @Override
             protected void onDraw(Canvas canvas) {
                 rect.set(0, 0, getMeasuredWidth(), getMeasuredHeight());
-                canvas.drawRoundRect(rect, AndroidUtilities.dp(4), AndroidUtilities.dp(4), Theme.chat_timeBackgroundPaint);
+                canvas.drawRoundRect(rect, dp(4), dp(4), Theme.chat_timeBackgroundPaint);
             }
         };
         videoInfoContainer.setWillNotDraw(false);
-        videoInfoContainer.setPadding(AndroidUtilities.dp(5), 0, AndroidUtilities.dp(5), 0);
+        videoInfoContainer.setPadding(dp(5), 0, dp(5), 0);
         container.addView(videoInfoContainer, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, 17, Gravity.BOTTOM | Gravity.LEFT, 4, 0, 0, 4));
 
-        ImageView imageView1 = new ImageView(context);
-        imageView1.setImageResource(R.drawable.play_mini_video);
-        videoInfoContainer.addView(imageView1, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT | Gravity.CENTER_VERTICAL));
+        videoPlayImageView = new ImageView(context);
+        videoPlayImageView.setImageResource(R.drawable.play_mini_video);
+        videoInfoContainer.addView(videoPlayImageView, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT | Gravity.CENTER_VERTICAL));
 
         videoTextView = new TextView(context);
         videoTextView.setTextColor(0xffffffff);
-        videoTextView.setTypeface(AndroidUtilities.getTypeface(AndroidUtilities.TYPEFACE_ROBOTO_MEDIUM));
+        videoTextView.setTypeface(AndroidUtilities.bold());
         videoTextView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 12);
         videoTextView.setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
         videoInfoContainer.addView(videoTextView, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT | Gravity.CENTER_VERTICAL, 13, -0.7f, 0, 0));
@@ -240,7 +258,7 @@ public class PhotoAttachPhotoCell extends FrameLayout {
         checkFrame = new FrameLayout(context);
         addView(checkFrame, LayoutHelper.createFrame(42, 42, Gravity.LEFT | Gravity.TOP, 38, 0, 0, 0));
 
-        itemSize = AndroidUtilities.dp(80);
+        itemSize = dp(80);
     }
 
     public boolean canRevealSpoiler() {
@@ -266,6 +284,30 @@ public class PhotoAttachPhotoCell extends FrameLayout {
             }
         });
         animator.start();
+    }
+
+    public void setHighQuality(boolean highQuality) {
+        if (this.highQuality != highQuality) {
+            this.highQuality = highQuality;
+
+            if (photoEntry != null) {
+                if (photoEntry.isVideo) {
+                    imageView.setOrientation(0, true);
+                    videoInfoContainer.setVisibility(VISIBLE);
+                    videoPlayImageView.setVisibility(VISIBLE);
+                    ((LayoutParams) videoTextView.getLayoutParams()).leftMargin = dp(13);
+                    videoTextView.setText(AndroidUtilities.formatShortDuration(photoEntry.duration));
+                } else if (photoEntry.highQuality) {
+                    videoInfoContainer.setVisibility(VISIBLE);
+                    videoPlayImageView.setVisibility(GONE);
+                    ((LayoutParams) videoTextView.getLayoutParams()).leftMargin = dp(0);
+                    videoTextView.setText(getString(R.string.ShortHighQuality));
+                } else {
+                    videoPlayImageView.setVisibility(GONE);
+                    videoInfoContainer.setVisibility(INVISIBLE);
+                }
+            }
+        }
     }
 
     public void setHasSpoiler(boolean hasSpoiler) {
@@ -297,6 +339,40 @@ public class PhotoAttachPhotoCell extends FrameLayout {
             if (hasSpoiler) {
                 updateSpoilers2(hasSpoiler);
             }
+        }
+    }
+
+    private SpannableString star, lock;
+    public void setStarsPrice(long stars, boolean multiple) {
+        if (multiple != starsSelectedMultiple || stars != this.stars) {
+            this.stars = stars;
+            this.starsSelectedMultiple = multiple;
+
+            SpannableStringBuilder s = null;
+            if (stars > 0) {
+                s = new SpannableStringBuilder();
+                if (star == null) {
+                    star = new SpannableString("⭐");
+                    ColoredImageSpan span = new ColoredImageSpan(R.drawable.star_small_inner);
+                    span.setScale(.7f, .7f);
+                    star.setSpan(span, 0, star.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                }
+                s.append(star);
+                s.append(" ");
+                if (multiple) {
+                    if (lock == null) {
+                        lock = new SpannableString("l");
+                        ColoredImageSpan span = new ColoredImageSpan(R.drawable.msg_mini_lock2);
+                        lock.setSpan(span, 0, lock.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                    }
+                    s.append(lock);
+                } else {
+                    s.append(Long.toString(stars));
+                }
+            }
+            imageView.setBlurredText(s);
+            imageView.invalidate();
+            container.invalidate();
         }
     }
 
@@ -353,7 +429,7 @@ public class PhotoAttachPhotoCell extends FrameLayout {
         layoutParams = (LayoutParams) checkBox.getLayoutParams();
         layoutParams.gravity = Gravity.RIGHT | Gravity.TOP;
         layoutParams.leftMargin = 0;
-        layoutParams.rightMargin = layoutParams.topMargin = AndroidUtilities.dp(5);
+        layoutParams.rightMargin = layoutParams.topMargin = dp(5);
         checkBox.setDrawBackgroundAsArc(6);
 
         itemSizeChanged = true;
@@ -362,12 +438,12 @@ public class PhotoAttachPhotoCell extends FrameLayout {
     @Override
     protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
         if (itemSizeChanged) {
-            super.onMeasure(MeasureSpec.makeMeasureSpec(itemSize, MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(itemSize + AndroidUtilities.dp(5), MeasureSpec.EXACTLY));
+            super.onMeasure(MeasureSpec.makeMeasureSpec(itemSize, MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(itemSize + dp(ChatAttachAlertPhotoLayout.GAP), MeasureSpec.EXACTLY));
         } else {
             if (isVertical) {
-                super.onMeasure(MeasureSpec.makeMeasureSpec(AndroidUtilities.dp(80), MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(AndroidUtilities.dp(80 + (isLast ? 0 : 6)), MeasureSpec.EXACTLY));
+                super.onMeasure(MeasureSpec.makeMeasureSpec(dp(80), MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(dp(80 + (isLast ? 0 : 6)), MeasureSpec.EXACTLY));
             } else {
-                super.onMeasure(MeasureSpec.makeMeasureSpec(AndroidUtilities.dp(80 + (isLast ? 0 : 6)), MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(AndroidUtilities.dp(80), MeasureSpec.EXACTLY));
+                super.onMeasure(MeasureSpec.makeMeasureSpec(dp(80 + (isLast ? 0 : 6)), MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(dp(80), MeasureSpec.EXACTLY));
             }
         }
     }
@@ -396,18 +472,28 @@ public class PhotoAttachPhotoCell extends FrameLayout {
         return videoInfoContainer;
     }
 
-    public void setPhotoEntry(MediaController.PhotoEntry entry, boolean needCheckShow, boolean last) {
+    public void setPhotoEntry(MediaController.PhotoEntry entry, boolean selectedMultiple, boolean needCheckShow, boolean last) {
         pressed = false;
         photoEntry = entry;
         isLast = last;
         if (photoEntry.isVideo) {
             imageView.setOrientation(0, true);
             videoInfoContainer.setVisibility(VISIBLE);
+            videoPlayImageView.setVisibility(VISIBLE);
+            ((LayoutParams) videoTextView.getLayoutParams()).leftMargin = dp(13);
             videoTextView.setText(AndroidUtilities.formatShortDuration(photoEntry.duration));
+        } else if (photoEntry.highQuality) {
+            videoInfoContainer.setVisibility(VISIBLE);
+            videoPlayImageView.setVisibility(GONE);
+            ((LayoutParams) videoTextView.getLayoutParams()).leftMargin = dp(0);
+            videoTextView.setText(getString(R.string.ShortHighQuality));
         } else {
+            videoPlayImageView.setVisibility(GONE);
             videoInfoContainer.setVisibility(INVISIBLE);
         }
-        if (photoEntry.thumbPath != null) {
+        if (photoEntry.coverPath != null) {
+            imageView.setImage(photoEntry.coverPath, null, Theme.chat_attachEmptyDrawable);
+        } else if (photoEntry.thumbPath != null) {
             imageView.setImage(photoEntry.thumbPath, null, Theme.chat_attachEmptyDrawable);
         } else if (photoEntry.path != null) {
             if (photoEntry.isVideo) {
@@ -425,6 +511,8 @@ public class PhotoAttachPhotoCell extends FrameLayout {
         videoInfoContainer.setAlpha(showing ? 0.0f : 1.0f);
         requestLayout();
         setHasSpoiler(entry.hasSpoiler);
+        setHighQuality(entry.highQuality);
+        setStarsPrice(entry.starsAmount, selectedMultiple);
     }
 
     public void setPhotoEntry(MediaController.SearchImage searchImage, boolean needCheckShow, boolean last) {
@@ -464,6 +552,8 @@ public class PhotoAttachPhotoCell extends FrameLayout {
         videoInfoContainer.setAlpha(showing ? 0.0f : 1.0f);
         requestLayout();
         setHasSpoiler(false);
+        setHighQuality(false);
+        setStarsPrice(0, false);
     }
 
     public boolean isChecked() {
@@ -513,8 +603,8 @@ public class PhotoAttachPhotoCell extends FrameLayout {
         checkBox.setNum(num);
     }
 
-    public void setOnCheckClickLisnener(OnClickListener onCheckClickLisnener) {
-        checkFrame.setOnClickListener(onCheckClickLisnener);
+    public void setOnCheckClickListener(OnClickListener onCheckClickListener) {
+        checkFrame.setOnClickListener(onCheckClickListener);
     }
 
     public void setDelegate(PhotoAttachPhotoCellDelegate delegate) {
@@ -616,20 +706,20 @@ public class PhotoAttachPhotoCell extends FrameLayout {
         info.setEnabled(true);
         StringBuilder sb = new StringBuilder();
         if (photoEntry != null && photoEntry.isVideo) {
-            sb.append(LocaleController.getString("AttachVideo", R.string.AttachVideo) + ", " + LocaleController.formatDuration(photoEntry.duration));
+            sb.append(getString(R.string.AttachVideo) + ", " + LocaleController.formatDuration(photoEntry.duration));
         } else {
-            sb.append(LocaleController.getString("AttachPhoto", R.string.AttachPhoto));
+            sb.append(getString(R.string.AttachPhoto));
         }
         if (photoEntry != null) {
             sb.append(". ");
-            sb.append(LocaleController.getInstance().formatterStats.format(photoEntry.dateTaken * 1000L));
+            sb.append(LocaleController.getInstance().getFormatterStats().format(photoEntry.dateTaken * 1000L));
         }
         info.setText(sb);
         if (checkBox.isChecked()) {
             info.setSelected(true);
         }
         if (Build.VERSION.SDK_INT >= 21) {
-            info.addAction(new AccessibilityNodeInfo.AccessibilityAction(R.id.acc_action_open_photo, LocaleController.getString("Open", R.string.Open)));
+            info.addAction(new AccessibilityNodeInfo.AccessibilityAction(R.id.acc_action_open_photo, getString(R.string.Open)));
         }
     }
 

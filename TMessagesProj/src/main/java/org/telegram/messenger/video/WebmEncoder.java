@@ -11,14 +11,12 @@ import android.graphics.PorterDuff;
 import android.graphics.PorterDuffXfermode;
 import android.graphics.RectF;
 import android.graphics.Typeface;
-import android.opengl.GLES20;
-import android.opengl.GLUtils;
 import android.os.Build;
 import android.text.Layout;
+import android.text.Spannable;
 import android.text.SpannableString;
 import android.text.Spanned;
 import android.text.TextUtils;
-import android.util.Log;
 import android.util.Pair;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -28,32 +26,22 @@ import android.view.inputmethod.EditorInfo;
 import androidx.annotation.NonNull;
 import androidx.annotation.RequiresApi;
 
-import com.google.common.collect.BiMap;
-
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ApplicationLoader;
-import org.telegram.messenger.Bitmaps;
 import org.telegram.messenger.Emoji;
 import org.telegram.messenger.FileLog;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.UserConfig;
-import org.telegram.messenger.Utilities;
 import org.telegram.messenger.VideoEditedInfo;
-import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Components.AnimatedEmojiSpan;
 import org.telegram.ui.Components.AnimatedFileDrawable;
-import org.telegram.ui.Components.CubicBezierInterpolator;
 import org.telegram.ui.Components.Paint.Views.EditTextOutline;
 import org.telegram.ui.Components.Paint.Views.PaintTextOptionsView;
 import org.telegram.ui.Components.RLottieDrawable;
 
 import java.io.File;
-import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
-import java.nio.channels.FileChannel;
 import java.util.ArrayList;
-
-import javax.microedition.khronos.opengles.GL10;
 
 public class WebmEncoder {
 
@@ -70,9 +58,11 @@ public class WebmEncoder {
     public static native void stop(long ptr);
 
 
-    public static boolean convert(MediaCodecVideoConvertor.ConvertVideoParams params) {
+    public static boolean convert(MediaCodecVideoConvertor.ConvertVideoParams params, int triesLeft) {
         final int W = params.resultWidth;
         final int H = params.resultHeight;
+
+        final long maxFileSize = 255 * 1024;
 
         final long ptr = createEncoder(params.cacheFile.getAbsolutePath(), W, H, params.framerate, params.bitrate);
         if (ptr == 0) {
@@ -102,7 +92,7 @@ public class WebmEncoder {
                 }
 
                 if (params.callback != null) {
-                    params.callback.didWriteData(params.cacheFile.length(), (float) frame / framesCount);
+                    params.callback.didWriteData(Math.min(maxFileSize, params.cacheFile.length()), (float) frame / framesCount);
                 }
 
                 if (frame % 3 == 0 && params.callback != null) {
@@ -119,11 +109,20 @@ public class WebmEncoder {
             }
         }
 
-        if (params.callback != null) {
-            params.callback.didWriteData(params.cacheFile.length(), 1f);
+        long fileSize = params.cacheFile.length();
+        if (triesLeft > 0 && fileSize > maxFileSize) {
+            int oldBitrate = params.bitrate;
+            params.bitrate *= ((float) maxFileSize / fileSize) * .9f;
+            params.cacheFile.delete();
+            FileLog.d("webm encoded too much, got " + fileSize + ", old bitrate = " + oldBitrate + " new bitrate = " + params.bitrate);
+            return convert(params, triesLeft - 1);
         }
 
-        FileLog.d("webm encoded to " + params.cacheFile + " with size=" + params.cacheFile.length());
+        if (params.callback != null) {
+            params.callback.didWriteData(fileSize, 1f);
+        }
+
+        FileLog.d("webm encoded to " + params.cacheFile + " with size=" + fileSize + " triesLeft=" + triesLeft);
 
         return error;
     }
@@ -139,10 +138,16 @@ public class WebmEncoder {
         private final Paint clearPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint bitmapPaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.DITHER_FLAG);
 
+        private final Path clipPath;
+
         public FrameDrawer(MediaCodecVideoConvertor.ConvertVideoParams params) {
             this.W = params.resultWidth;
             this.H = params.resultHeight;
             this.fps = params.framerate;
+
+            clipPath = new Path();
+            RectF bounds = new RectF(0, 0, W, H);
+            clipPath.addRoundRect(bounds, W * .125f, H * .125f, Path.Direction.CW);
 
             photo = BitmapFactory.decodeFile(params.videoPath);
 
@@ -165,6 +170,8 @@ public class WebmEncoder {
 
         public void draw(Canvas canvas, int frame) {
             canvas.drawPaint(clearPaint);
+            canvas.save();
+            canvas.clipPath(clipPath);
             if (photo != null) {
                 canvas.drawBitmap(photo, 0, 0, null);
             }
@@ -173,6 +180,7 @@ public class WebmEncoder {
                 VideoEditedInfo.MediaEntity entity = mediaEntities.get(a);
                 drawEntity(canvas, entity, entity.color, time);
             }
+            canvas.restore();
         }
 
         private void drawEntity(Canvas canvas, VideoEditedInfo.MediaEntity entity, int textColor, long time) {
@@ -231,7 +239,7 @@ public class WebmEncoder {
                 editText.setTypeface(typeface);
             }
             editText.setTextSize(TypedValue.COMPLEX_UNIT_PX, entity.fontSize);
-            SpannableString text = new SpannableString(entity.text);
+            CharSequence text = new SpannableString(entity.text);
             for (VideoEditedInfo.EmojiEntity e : entity.entities) {
                 if (e.documentAbsolutePath == null) {
                     continue;
@@ -267,17 +275,19 @@ public class WebmEncoder {
                             initStickerEntity(e.entity);
                     }
                 };
-                text.setSpan(span, e.offset, e.offset + e.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                ((Spannable) text).setSpan(span, e.offset, e.offset + e.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             }
-            editText.setText(Emoji.replaceEmoji(text, editText.getPaint().getFontMetricsInt(), (int) (editText.getTextSize() * .8f), false));
-            editText.setTextColor(entity.color);
-            CharSequence text2 = editText.getText();
-            if (text2 instanceof Spanned) {
-                Emoji.EmojiSpan[] spans = ((Spanned) text2).getSpans(0, text2.length(), Emoji.EmojiSpan.class);
-                for (int i = 0; i < spans.length; ++i) {
-                    spans[i].scale = .85f;
+            text = Emoji.replaceEmoji(text, editText.getPaint().getFontMetricsInt(), false);
+            if (text instanceof Spanned) {
+                Emoji.EmojiSpan[] spans = ((Spanned) text).getSpans(0, text.length(), Emoji.EmojiSpan.class);
+                if (spans != null) {
+                    for (int i = 0; i < spans.length; ++i) {
+                        spans[i].scale = .85f;
+                    }
                 }
             }
+            editText.setText(text);
+            editText.setTextColor(entity.color);
 
 
             int gravity;
@@ -365,11 +375,11 @@ public class WebmEncoder {
                 entity.bitmap = Bitmap.createBitmap(entity.W, entity.H, Bitmap.Config.ARGB_8888);
                 entity.metadata = new int[3];
                 entity.ptr = RLottieDrawable.create(entity.text, null, entity.W, entity.H, entity.metadata, false, null, false, 0);
-                entity.framesPerDraw = entity.metadata[1] / fps;
+                entity.framesPerDraw = (float) entity.metadata[1] / fps;
             } else if ((entity.subType & 4) != 0) {
                 entity.looped = false;
                 entity.animatedFileDrawable = new AnimatedFileDrawable(new File(entity.text), true, 0, 0, null, null, null, 0, UserConfig.selectedAccount, true, 512, 512, null);
-                entity.framesPerDraw = entity.animatedFileDrawable.getFps() / fps;
+                entity.framesPerDraw = (float) entity.animatedFileDrawable.getFps() / fps;
                 entity.currentFrame = 1;
                 entity.animatedFileDrawable.getNextFrame(true);
                 if (entity.type == VideoEditedInfo.MediaEntity.TYPE_ROUND) {
@@ -380,30 +390,11 @@ public class WebmEncoder {
                 if (!TextUtils.isEmpty(entity.segmentedPath) && (entity.subType & 16) != 0) {
                     path = entity.segmentedPath;
                 }
-                if (Build.VERSION.SDK_INT >= 19) {
-                    BitmapFactory.Options opts = new BitmapFactory.Options();
-                    if (entity.type == VideoEditedInfo.MediaEntity.TYPE_PHOTO) {
-                        opts.inMutable = true;
-                    }
-                    entity.bitmap = BitmapFactory.decodeFile(path, opts);
-                } else {
-                    try {
-                        File filePath = new File(path);
-                        RandomAccessFile file = new RandomAccessFile(filePath, "r");
-                        ByteBuffer buffer = file.getChannel().map(FileChannel.MapMode.READ_ONLY, 0, filePath.length());
-                        BitmapFactory.Options bmOptions = new BitmapFactory.Options();
-                        bmOptions.inJustDecodeBounds = true;
-                        Utilities.loadWebpImage(null, buffer, buffer.limit(), bmOptions, true);
-                        if (entity.type == VideoEditedInfo.MediaEntity.TYPE_PHOTO) {
-                            bmOptions.inMutable = true;
-                        }
-                        entity.bitmap = Bitmaps.createBitmap(bmOptions.outWidth, bmOptions.outHeight, Bitmap.Config.ARGB_8888);
-                        Utilities.loadWebpImage(entity.bitmap, buffer, buffer.limit(), null, true);
-                        file.close();
-                    } catch (Throwable e) {
-                        FileLog.e(e);
-                    }
+                BitmapFactory.Options opts = new BitmapFactory.Options();
+                if (entity.type == VideoEditedInfo.MediaEntity.TYPE_PHOTO) {
+                    opts.inMutable = true;
                 }
+                entity.bitmap = BitmapFactory.decodeFile(path, opts);
                 if (entity.type == VideoEditedInfo.MediaEntity.TYPE_PHOTO && entity.bitmap != null) {
                     entity.roundRadius = AndroidUtilities.dp(12) / (float) Math.min(entity.viewWidth, entity.viewHeight);
                     Pair<Integer, Integer> orientation = AndroidUtilities.getImageOrientation(entity.text);
@@ -445,12 +436,12 @@ public class WebmEncoder {
             if (bitmap != null) {
                 entity.matrix.postScale(1f / bitmap.getWidth(), 1f / bitmap.getHeight());
             }
-            if ((entity.subType & 2) != 0) {
+            if (entity.type != VideoEditedInfo.MediaEntity.TYPE_TEXT && (entity.subType & 2) != 0) {
                 entity.matrix.postScale(-1, 1, .5f, .5f);
             }
             entity.matrix.postScale(entity.width * W, entity.height * H);
             entity.matrix.postTranslate(entity.x * W, entity.y * H);
-            entity.matrix.postRotate((float) (-entity.rotation / Math.PI * 180), (entity.x + entity.width) * W, (entity.x + entity.height) * H);
+            entity.matrix.postRotate((float) (-entity.rotation / Math.PI * 180), (entity.x + entity.width / 2f) * W, (entity.y + entity.height / 2f) * H);
         }
 
         Path path;

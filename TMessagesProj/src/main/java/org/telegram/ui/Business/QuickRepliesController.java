@@ -18,8 +18,8 @@ import org.telegram.messenger.Utilities;
 import org.telegram.tgnet.ConnectionsManager;
 import org.telegram.tgnet.NativeByteBuffer;
 import org.telegram.tgnet.TLRPC;
+import org.telegram.tgnet.tl.TL_account;
 import org.telegram.ui.ChatActivity;
-import org.telegram.ui.Components.ChatActivityInterface;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -173,7 +173,7 @@ public class QuickRepliesController {
                         storage.getChatsInternal(TextUtils.join(",", chatsToLoad), chats);
                     }
                     if (!usersToLoad.isEmpty()) {
-                        storage.getUsersInternal(TextUtils.join(",", usersToLoad), users);
+                        storage.getUsersInternal(usersToLoad, users);
                     }
 
                 } catch (Exception e) {
@@ -464,7 +464,7 @@ public class QuickRepliesController {
             }));
 
             if (GREETING.equals(reply.name)) {
-                ConnectionsManager.getInstance(currentAccount).sendRequest(new TLRPC.TL_account_updateBusinessGreetingMessage(), null);
+                ConnectionsManager.getInstance(currentAccount).sendRequest(new TL_account.updateBusinessGreetingMessage(), null);
                 TLRPC.UserFull userInfo = MessagesController.getInstance(currentAccount).getUserFull(UserConfig.getInstance(currentAccount).getClientUserId());
                 if (userInfo != null) {
                     userInfo.flags2 &=~ 4;
@@ -472,7 +472,7 @@ public class QuickRepliesController {
                     MessagesStorage.getInstance(currentAccount).updateUserInfo(userInfo, true);
                 }
             } else if (AWAY.equals(reply.name)) {
-                ConnectionsManager.getInstance(currentAccount).sendRequest(new TLRPC.TL_account_updateBusinessAwayMessage(), null);
+                ConnectionsManager.getInstance(currentAccount).sendRequest(new TL_account.updateBusinessAwayMessage(), null);
                 TLRPC.UserFull userInfo = MessagesController.getInstance(currentAccount).getUserFull(UserConfig.getInstance(currentAccount).getClientUserId());
                 if (userInfo != null) {
                     userInfo.flags2 &=~ 8;
@@ -531,7 +531,7 @@ public class QuickRepliesController {
                     storage.getChatsInternal(TextUtils.join(",", chatsToLoad), chats);
                 }
                 if (!usersToLoad.isEmpty()) {
-                    storage.getUsersInternal(TextUtils.join(",", usersToLoad), users);
+                    storage.getUsersInternal(usersToLoad, users);
                 }
                 final MessageObject finalMessageObject = messageObject;
                 AndroidUtilities.runOnUIThread(() -> {
@@ -806,7 +806,7 @@ public class QuickRepliesController {
                             for (int i = 0; i < ids.size(); ++i) {
                                 req.random_id.add(Utilities.random.nextLong());
                             }
-                            ConnectionsManager.getInstance(currentAccount).sendRequest(req2, null);
+                            ConnectionsManager.getInstance(currentAccount).sendRequest(req, null);
                         } else {
                             FileLog.e("received " + res + " " + err + " on getQuickReplyMessages when trying to send quick reply");
                         }

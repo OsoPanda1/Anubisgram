@@ -221,7 +221,7 @@ public class MusicBrowserService extends MediaBrowserService implements Notifica
                         cursor.dispose();
                         if (!usersToLoad.isEmpty()) {
                             ArrayList<TLRPC.User> usersArrayList = new ArrayList<>();
-                            messagesStorage.getUsersInternal(TextUtils.join(",", usersToLoad), usersArrayList);
+                            messagesStorage.getUsersInternal(usersToLoad, usersArrayList);
                             for (int a = 0; a < usersArrayList.size(); a++) {
                                 TLRPC.User user = usersArrayList.get(a);
                                 users.put(user.id, user);
@@ -571,18 +571,18 @@ public class MusicBrowserService extends MediaBrowserService implements Notifica
             mediaSession.setActive(true);
         }
 
-        MessageObject messageObject = MediaController.getInstance().getPlayingMessageObject();
+        final MessageObject messageObject = MediaController.getInstance().getPlayingMessageObject();
         if (messageObject == null) {
             return;
         }
-        MediaMetadata.Builder builder = new MediaMetadata.Builder();
+        final MediaMetadata.Builder builder = new MediaMetadata.Builder();
         builder.putLong(MediaMetadata.METADATA_KEY_DURATION, (long) (messageObject.getDuration() * 1000));
         builder.putString(MediaMetadata.METADATA_KEY_ARTIST, messageObject.getMusicAuthor());
         builder.putString(MediaMetadata.METADATA_KEY_TITLE, messageObject.getMusicTitle());
         AudioInfo audioInfo = MediaController.getInstance().getAudioInfo();
         if (audioInfo != null) {
             Bitmap bitmap = audioInfo.getCover();
-            if (bitmap != null) {
+            if (bitmap != null && !bitmap.isRecycled()) {
                 builder.putBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART, bitmap);
             }
         }

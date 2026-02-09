@@ -15,10 +15,7 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
-import androidx.core.content.ContextCompat;
-
 import org.telegram.messenger.AndroidUtilities;
-import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.R;
 import org.telegram.messenger.UserConfig;
 import org.telegram.messenger.UserObject;
@@ -27,12 +24,14 @@ import org.telegram.ui.ActionBar.SimpleTextView;
 import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Components.AnimatedEmojiDrawable;
 import org.telegram.ui.Components.LayoutHelper;
-import org.telegram.ui.Components.Text;
+import org.telegram.ui.Components.UItem;
+import org.telegram.ui.Components.UniversalAdapter;
+import org.telegram.ui.Components.UniversalRecyclerView;
 
 public class PremiumFeatureCell extends FrameLayout {
 
-    private final SimpleTextView title;
-    private final TextView description;
+    public final SimpleTextView title;
+    public final TextView description;
     public ImageView imageView;
     public final ImageView nextIcon;
     boolean drawDivider;
@@ -53,7 +52,7 @@ public class PremiumFeatureCell extends FrameLayout {
         setClipChildren(false);
         linearLayout.setClipChildren(false);
         title = new SimpleTextView(context);
-        title.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"));
+        title.setTypeface(AndroidUtilities.bold());
         title.setTextSize(15);
         title.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText, resourcesProvider));
         linearLayout.addView(title, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
@@ -105,6 +104,12 @@ public class PremiumFeatureCell extends FrameLayout {
 
     private Drawable premiumStar;
     public void setEmoji(long documentId, boolean animated) {
+        if (imageDrawable == null) {
+            imageDrawable = new AnimatedEmojiDrawable.SwapAnimatedEmojiDrawable(this, false, dp(24), AnimatedEmojiDrawable.CACHE_TYPE_ALERT_PREVIEW_STATIC);
+            if (isAttachedToWindow()) {
+                imageDrawable.attach();
+            }
+        }
         if (documentId == 0) {
             if (premiumStar == null) {
                 premiumStar = getContext().getResources().getDrawable(R.drawable.msg_premium_prolfilestar).mutate();
@@ -152,5 +157,25 @@ public class PremiumFeatureCell extends FrameLayout {
             imageDrawable.detach();
         }
         super.onDetachedFromWindow();
+    }
+
+    public static class Factory extends UItem.UItemFactory<PremiumFeatureCell> {
+        static { setup(new Factory()); }
+
+        @Override
+        public PremiumFeatureCell createView(Context context, int currentAccount, int classGuid, Theme.ResourcesProvider resourcesProvider) {
+            return new PremiumFeatureCell(context, resourcesProvider);
+        }
+
+        @Override
+        public void bindView(View view, UItem item, boolean divider, UniversalAdapter adapter, UniversalRecyclerView listView) {
+            ((PremiumFeatureCell) view).setData((PremiumPreviewFragment.PremiumFeatureData) item.object, divider);
+        }
+
+        public static UItem of(PremiumPreviewFragment.PremiumFeatureData data) {
+            UItem item = UItem.ofFactory(Factory.class);
+            item.object = data;
+            return item;
+        }
     }
 }

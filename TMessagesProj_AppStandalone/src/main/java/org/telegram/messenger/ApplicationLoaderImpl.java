@@ -1,5 +1,6 @@
 package org.telegram.messenger;
 
+import static org.telegram.messenger.AndroidUtilities.isInAirplaneMode;
 import static org.telegram.ui.PremiumPreviewFragment.applyNewSpan;
 
 import android.app.Activity;
@@ -23,9 +24,10 @@ import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.Adapters.DrawerLayoutAdapter;
 import org.telegram.ui.Components.AlertsCreator;
 import org.telegram.ui.Components.BulletinFactory;
-import org.telegram.ui.Components.SpannableStringLight;
 import org.telegram.ui.Components.UpdateAppAlertDialog;
+import org.telegram.ui.Components.UpdateButton;
 import org.telegram.ui.Components.UpdateLayout;
+import org.telegram.ui.IUpdateButton;
 import org.telegram.ui.IUpdateLayout;
 import org.telegram.ui.LaunchActivity;
 import org.telegram.ui.SMSStatsActivity;
@@ -115,6 +117,11 @@ public class ApplicationLoaderImpl extends ApplicationLoader {
     }
 
     @Override
+    public IUpdateButton takeUpdateButton(Context context) {
+        return new UpdateButton(context);
+    }
+
+    @Override
     public TLRPC.Update parseTLUpdate(int constructor) {
         if (constructor == TL_smsjobs.TL_updateSmsJob.constructor) {
             return new TL_smsjobs.TL_updateSmsJob();
@@ -188,7 +195,7 @@ public class ApplicationLoaderImpl extends ApplicationLoader {
                     lastFragment.presentFragment(new SMSStatsActivity());
                 }
             });
-            if (SMSStatsActivity.isAirplaneMode(LaunchActivity.instance) || SMSJobController.getInstance(UserConfig.selectedAccount).hasError()) {
+            if (isInAirplaneMode(LaunchActivity.instance) || SMSJobController.getInstance(UserConfig.selectedAccount).hasError()) {
                 item.withError();
             }
             items.add(item);
